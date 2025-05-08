@@ -7,6 +7,7 @@
 #include <QMap> // For chat history
 #include <QStringList> // For chat history
 #include "chatmessagedisplay.h" // 添加自定义组件头文件
+#include "networkmanager.h" // Include NetworkManager
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
@@ -76,8 +77,10 @@ private:
     QPushButton *closeChatButton;
 
     QLabel *emptyChatPlaceholderLabel;
+    QLabel *networkStatusLabel; // For displaying network status
 
     ContactManager *contactManager;
+    NetworkManager *networkManager; // NetworkManager instance
 
     // Data members for chat history and current contact
     QMap<QString, QStringList> chatHistories;
@@ -92,6 +95,14 @@ private slots:
     void handleContactAdded(const QString &name);
     void onContactSelected(QListWidgetItem *current, QListWidgetItem *previous);
     void onSendButtonClicked();
+
+    // NetworkManager slots
+    void handleNetworkConnected();
+    void handleNetworkDisconnected();
+    void handleNewMessageReceived(const QString &message);
+    void handleNetworkError(QAbstractSocket::SocketError socketError);
+    void updateNetworkStatus(const QString &status);
+    void handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort);
 
     // Formatting slots
     void onBoldButtonToggled(bool checked);

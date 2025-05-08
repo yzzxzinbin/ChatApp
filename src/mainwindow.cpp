@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "contactmanager.h"
 #include "chatmessagedisplay.h"
+#include "networkmanager.h" // 确保包含了 NetworkManager
 
 #include <QApplication>
 #include <QListWidget>
@@ -17,14 +18,21 @@
 #include <QTextCharFormat>
 #include <QTextDocumentFragment>
 #include <QScrollBar>
-#include <QColorDialog> // 添加颜色对话框头文件
+#include <QColorDialog>
+#include <QStatusBar> // 确保包含了 QStatusBar
+#include <QMessageBox> // 确保包含了 QMessageBox
+#include <QInputDialog> // For naming incoming connections
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
 
-    contactManager = new ContactManager(this);
+    // 1. 首先初始化 NetworkManager
+    networkManager = new NetworkManager(this);
+
+    // 2. 然后初始化 ContactManager，并将 NetworkManager 实例传递给它
+    contactManager = new ContactManager(networkManager, this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
 
     // 初始化默认文本颜色和背景色
@@ -35,6 +43,17 @@ MainWindow::MainWindow(QWidget *parent)
     applyStyles();
     setWindowTitle("Chat Application");
     resize(1024, 768);
+
+    // 连接 NetworkManager 的信号到 MainWindow 的槽
+    connect(networkManager, &NetworkManager::connected, this, &MainWindow::handleNetworkConnected);
+    connect(networkManager, &NetworkManager::disconnected, this, &MainWindow::handleNetworkDisconnected);
+    connect(networkManager, &NetworkManager::newMessageReceived, this, &MainWindow::handleNewMessageReceived);
+    connect(networkManager, &NetworkManager::networkError, this, &MainWindow::handleNetworkError);
+    connect(networkManager, &NetworkManager::serverStatusMessage, this, &MainWindow::updateNetworkStatus);
+    connect(networkManager, &NetworkManager::incomingConnectionRequest, this, &MainWindow::handleIncomingConnectionRequest);
+
+    // 应用启动后默认开启端口监听
+    networkManager->startListening();
 }
 
 MainWindow::~MainWindow()
@@ -198,23 +217,26 @@ void MainWindow::setupUI()
 
     chatAreaLayout->addWidget(chatStackedWidget);
     mainLayout->addWidget(chatAreaWidget, 1); // 设置聊天区域为主要伸缩区域
-    centralWidget->setLayout(mainLayout); 
+    centralWidget->setLayout(mainLayout);
 
     chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel); // 初始化时不选中联系人对话
 
-    QTextCharFormat initialFormat;
+    // 添加状态栏用于显示网络消息
+    networkStatusLabel = new QLabel("Network Status: Idle", this);
+    statusBar()->addWidget(networkStatusLabel);
+
+    QTextCharFormat initialFormat; // 初始化文本属性
     if (fontFamilyComboBox->currentFont().pointSize() > 0)
-    {
+    { // 初始化字体类型
         initialFormat.setFont(fontFamilyComboBox->currentFont());
     }
     else
     {
         initialFormat.setFontFamilies({QApplication::font().family()});
-        initialFormat.setFontPointSize(QApplication::font().pointSize());
     }
     bool sizeFound = false;
     for (int i = 0; i < fontSizeComboBox->count(); ++i)
-    {
+    { // 查找并初始化文本字体大小和索引
         if (fontSizeComboBox->itemText(i) == "12")
         {
             fontSizeComboBox->setCurrentIndex(i);
@@ -282,37 +304,10 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
         if (chatHistories.contains(currentOpenChatContactName))
         {
             messagesToDisplay = chatHistories.value(currentOpenChatContactName);
-            if (messagesToDisplay.isEmpty())
-            {
-                QString welcomeMessageText = "Hello! How are you?";
-                QString welcomeMessageHtml = QString(
-                                                 "<div style=\"text-align: left; margin-bottom: 2px;\">"
-                                                 "<p style=\"margin:0; padding:0; text-align: left;\">"
-                                                 "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span><br> %2"
-                                                 "</p>"
-                                                 "</div>")
-                                                 .arg(currentOpenChatContactName.toHtmlEscaped())
-                                                 .arg(welcomeMessageText.toHtmlEscaped());
-
-                chatHistories[currentOpenChatContactName].append(welcomeMessageHtml);
-                messagesToDisplay.append(welcomeMessageHtml);
-            }
         }
         else
         {
             chatHistories[currentOpenChatContactName] = QStringList();
-            QString welcomeMessageText = "Hello! How are you?";
-            QString welcomeMessageHtml = QString(
-                                             "<div style=\"text-align: left; margin-bottom: 2px;\">"
-                                             "<p style=\"margin:0; padding:0; text-align: left;\">"
-                                             "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span> %2"
-                                             "</p>"
-                                             "</div>")
-                                             .arg(currentOpenChatContactName.toHtmlEscaped())
-                                             .arg(welcomeMessageText.toHtmlEscaped());
-
-            chatHistories[currentOpenChatContactName].append(welcomeMessageHtml);
-            messagesToDisplay.append(welcomeMessageHtml);
         }
 
         messageDisplay->setMessages(messagesToDisplay);
@@ -338,8 +333,16 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
 
 void MainWindow::onSendButtonClicked()
 {
-    if (currentOpenChatContactName.isEmpty())
+    if (currentOpenChatContactName.isEmpty()) {
+        updateNetworkStatus(tr("No active chat to send message."));
         return;
+    }
+    // 检查 NetworkManager 是否已初始化并且处于连接状态
+    if (!networkManager || networkManager->getCurrentSocketState() != QAbstractSocket::ConnectedState) {
+         updateNetworkStatus(tr("Not connected. Cannot send message."));
+         QMessageBox::warning(this, tr("Network Error"), tr("Not connected to any peer. Please connect first."));
+         return;
+    }
 
     QString plainMessageText = messageInputEdit->toPlainText().trimmed();
     if (!plainMessageText.isEmpty())
@@ -377,6 +380,9 @@ void MainWindow::onSendButtonClicked()
         chatHistories[currentOpenChatContactName].append(userMessageHtml);
 
         messageDisplay->addMessage(userMessageHtml);
+        
+        // 通过 NetworkManager 发送消息
+        networkManager->sendMessage(coreContent); // 发送实际内容，而不是包含 "Me:" 的完整 HTML
 
         messageInputEdit->clear();
         QTextCharFormat defaultFormat;
@@ -768,4 +774,103 @@ void MainWindow::applyStyles()
     underlineButton->setFixedSize(30, 30);
     colorButton->setFixedSize(30, 30);
     bgColorButton->setFixedSize(30, 30);
+}
+
+void MainWindow::handleNetworkConnected()
+{
+    updateNetworkStatus(tr("Connected."));
+    if (contactListWidget->currentItem() == nullptr && networkManager && networkManager->getPeerInfo().first.size() > 0) {
+        QString peerName = networkManager->getPeerInfo().first;
+        bool found = false;
+        for(int i=0; i<contactListWidget->count(); ++i) {
+            if(contactListWidget->item(i)->text() == peerName) {
+                contactListWidget->setCurrentRow(i);
+                found = true;
+                break;
+            }
+        }
+        if(!found) {
+            handleContactAdded(peerName);
+        }
+    }
+}
+
+void MainWindow::handleNetworkDisconnected()
+{
+    updateNetworkStatus(tr("Disconnected."));
+}
+
+void MainWindow::handleNewMessageReceived(const QString &message)
+{
+    if (currentOpenChatContactName.isEmpty() && networkManager && networkManager->getPeerInfo().first.size() > 0) {
+        QString peerName = networkManager->getPeerInfo().first;
+        bool found = false;
+        for(int i=0; i<contactListWidget->count(); ++i) {
+            if(contactListWidget->item(i)->text() == peerName) {
+                contactListWidget->setCurrentRow(i);
+                found = true;
+                break;
+            }
+        }
+        if(!found) {
+             handleContactAdded(peerName);
+        }
+    }
+
+    if (!currentOpenChatContactName.isEmpty()) {
+        QString receivedMessageHtml = QString(
+                                         "<div style=\"text-align: left; margin-bottom: 2px;\">"
+                                         "<p style=\"margin:0; padding:0; text-align: left;\">"
+                                         "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span> %2"
+                                         "</p>"
+                                         "</div>")
+                                         .arg(currentOpenChatContactName.toHtmlEscaped())
+                                         .arg(message);
+
+        chatHistories[currentOpenChatContactName].append(receivedMessageHtml);
+        messageDisplay->addMessage(receivedMessageHtml);
+    } else {
+        updateNetworkStatus(tr("Received message but no active chat: %1").arg(message));
+    }
+}
+
+void MainWindow::handleNetworkError(QAbstractSocket::SocketError socketError)
+{
+    Q_UNUSED(socketError);
+    if (networkManager) {
+      updateNetworkStatus(tr("Network Error: %1").arg(networkManager->getLastError()));
+    }
+}
+
+void MainWindow::updateNetworkStatus(const QString &status)
+{
+    if (networkStatusLabel) {
+        networkStatusLabel->setText(status);
+    } else {
+        statusBar()->showMessage(status, 5000);
+    }
+}
+
+void MainWindow::handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort)
+{
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, tr("Incoming Connection"),
+                                  tr("Accept connection from %1:%2?").arg(peerAddress).arg(peerPort),
+                                  QMessageBox::Yes | QMessageBox::No);
+    if (reply == QMessageBox::Yes) {
+        bool ok;
+        QString contactName = QInputDialog::getText(this, tr("Name Contact"),
+                                                  tr("Enter a name for this contact:"), QLineEdit::Normal,
+                                                  peerAddress, &ok);
+        if (ok && !contactName.isEmpty()) {
+            networkManager->acceptPendingConnection(contactName);
+        } else if (ok && contactName.isEmpty()) {
+            networkManager->acceptPendingConnection(peerAddress);
+        } else {
+            networkManager->rejectPendingConnection();
+            updateNetworkStatus(tr("Incoming connection naming cancelled. Rejected."));
+        }
+    } else {
+        networkManager->rejectPendingConnection();
+    }
 }
