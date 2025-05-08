@@ -27,9 +27,10 @@ MainWindow::MainWindow(QWidget *parent)
     contactManager = new ContactManager(this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
 
-    // 初始化默认文本颜色为黑色
+    // 初始化默认文本颜色和背景色
     currentTextColor = QColor(Qt::black);
-    
+    currentBgColor = QColor(Qt::transparent); // 默认背景色为透明
+
     setupUI();
     applyStyles();
     setWindowTitle("Chat Application");
@@ -45,17 +46,19 @@ void MainWindow::setupUI()
     centralWidget = new QWidget(this);
     setCentralWidget(centralWidget);
 
+    // 主布局
     mainLayout = new QHBoxLayout(centralWidget);
-    mainLayout->setSpacing(0);
-    mainLayout->setContentsMargins(0, 0, 0, 0);
+    mainLayout->setSpacing(0);                  // spacing（间距）是布局中各个控件之间的空隙
+    mainLayout->setContentsMargins(0, 0, 0, 0); // margins（边距）是布局整体与父窗口边界之间的距离
 
+    // 左侧固定宽度的侧边栏
     leftSidebar = new QWidget(this);
     leftSidebar->setObjectName("leftSidebar");
     leftSidebar->setFixedWidth(50);
     leftSidebarLayout = new QVBoxLayout(leftSidebar);
     leftSidebarLayout->setContentsMargins(5, 5, 5, 5);
     leftSidebarLayout->setSpacing(10);
-
+    // 添加联系人按钮
     addContactButton = new QPushButton(this);
     addContactButton->setObjectName("addContactButton");
     addContactButton->setIcon(QIcon(":/icons/add_user.svg"));
@@ -63,10 +66,10 @@ void MainWindow::setupUI()
     addContactButton->setToolTip("Add new contact");
     connect(addContactButton, &QPushButton::clicked, this, &MainWindow::onAddContactButtonClicked);
     leftSidebarLayout->addWidget(addContactButton);
+    leftSidebarLayout->addStretch();    // 添加垂直填充
+    mainLayout->addWidget(leftSidebar); // 将左侧侧边栏添加到主布局
 
-    leftSidebarLayout->addStretch();
-    mainLayout->addWidget(leftSidebar);
-
+    // 联系人列表
     contactListWidget = new QListWidget(this);
     contactListWidget->setObjectName("contactListWidget");
     contactListWidget->setMaximumWidth(250);
@@ -74,113 +77,118 @@ void MainWindow::setupUI()
     connect(contactListWidget, &QListWidget::currentItemChanged, this, &MainWindow::onContactSelected);
     mainLayout->addWidget(contactListWidget, 0);
 
+    // 聊天区域
     chatAreaWidget = new QWidget(this);
     chatAreaWidget->setObjectName("chatAreaWidget");
     chatAreaLayout = new QVBoxLayout(chatAreaWidget);
     chatAreaLayout->setSpacing(0);
     chatAreaLayout->setContentsMargins(0, 0, 0, 0);
 
+    // QStackedWidget 是一个可以在多个子窗口之间切换显示的控件（类似于“页面切换”），
+    // 只会显示其中一个子窗口，其余的隐藏。常用于实现多页面界面或内容切换。
     chatStackedWidget = new QStackedWidget(this);
-
     activeChatContentsWidget = new QWidget(this);
     activeChatContentsLayout = new QVBoxLayout(activeChatContentsWidget);
     activeChatContentsLayout->setSpacing(6);
     activeChatContentsLayout->setContentsMargins(10, 10, 10, 10);
 
+    // 聊天记录显示区域
     messageDisplay = new ChatMessageDisplay(this);
     messageDisplay->setObjectName("messageDisplay");
     messageDisplay->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
 
+    // 创建格式化工具栏
     formattingToolbarWidget = new QWidget(this);
     formattingToolbarWidget->setObjectName("formattingToolbarWidget");
     formattingToolbarLayout = new QHBoxLayout(formattingToolbarWidget);
     formattingToolbarLayout->setContentsMargins(0, 0, 0, 0);
     formattingToolbarLayout->setSpacing(5);
 
+    // 横向布局的工具栏组件:加粗、斜体、下划线、颜色选择器、字体大小选择器、字体选择器
     boldButton = new QPushButton("B", this);
     boldButton->setCheckable(true);
     connect(boldButton, &QPushButton::toggled, this, &MainWindow::onBoldButtonToggled);
-
     italicButton = new QPushButton("I", this);
     italicButton->setCheckable(true);
     connect(italicButton, &QPushButton::toggled, this, &MainWindow::onItalicButtonToggled);
-
     underlineButton = new QPushButton("U", this);
     underlineButton->setCheckable(true);
     connect(underlineButton, &QPushButton::toggled, this, &MainWindow::onUnderlineButtonToggled);
-    
-    // 创建颜色按钮
-    colorButton = new QPushButton(this);
+    colorButton = new QPushButton(this); // 创建前景颜色按钮
     colorButton->setObjectName("colorButton");
     colorButton->setToolTip("Text Color");
-    // 设置初始颜色为黑色
     QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentTextColor.name());
     colorButton->setStyleSheet(colorStyle);
     connect(colorButton, &QPushButton::clicked, this, &MainWindow::onColorButtonClicked);
-
-    fontSizeComboBox = new QComboBox(this);
-    for (int i = 8; i <= 28; i += 2) {
+    bgColorButton = new QPushButton(this); // 创建背景色按钮
+    bgColorButton->setObjectName("bgColorButton");
+    bgColorButton->setToolTip("Background Color");
+    QString bgColorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentBgColor.name());
+    bgColorButton->setStyleSheet(bgColorStyle);
+    connect(bgColorButton, &QPushButton::clicked, this, &MainWindow::onBgColorButtonClicked);
+    fontSizeComboBox = new QComboBox(this); // 字体大小选择器
+    for (int i = 8; i <= 28; i += 2)
+    {
         fontSizeComboBox->addItem(QString::number(i));
     }
     connect(fontSizeComboBox, &QComboBox::currentTextChanged, this, &MainWindow::onFontSizeChanged);
-
-    fontFamilyComboBox = new QFontComboBox(this);
+    fontFamilyComboBox = new QFontComboBox(this); // 字体选择器
     connect(fontFamilyComboBox, &QFontComboBox::currentFontChanged, this, &MainWindow::onFontFamilyChanged);
-
+    // 添加格式化工具栏组件到布局formattingToolbarLayout中
     formattingToolbarLayout->addWidget(boldButton);
     formattingToolbarLayout->addWidget(italicButton);
     formattingToolbarLayout->addWidget(underlineButton);
-    formattingToolbarLayout->addWidget(colorButton);  // 添加颜色按钮到工具栏
+    formattingToolbarLayout->addWidget(colorButton);
+    formattingToolbarLayout->addWidget(bgColorButton);
     formattingToolbarLayout->addWidget(fontSizeComboBox);
     formattingToolbarLayout->addWidget(fontFamilyComboBox, 1);
 
+    // 创建输入区域
     inputAreaWidget = new QWidget(this);
     inputAreaWidget->setObjectName("inputAreaWidget");
     inputAreaLayout = new QHBoxLayout(inputAreaWidget);
     inputAreaLayout->setContentsMargins(0, 0, 0, 0);
     inputAreaLayout->setSpacing(5);
-
-    messageInputEdit = new QTextEdit(this);
+    messageInputEdit = new QTextEdit(this); // 创建文本输入框
     messageInputEdit->setObjectName("messageInputEdit");
     messageInputEdit->setPlaceholderText("Type your message...");
-    messageInputEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
+    messageInputEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 自动伸展
     messageInputEdit->setMaximumHeight(120);
     connect(messageInputEdit, &QTextEdit::currentCharFormatChanged, this, &MainWindow::onCurrentCharFormatChanged);
     inputAreaLayout->addWidget(messageInputEdit, 1);
 
+    // 创建辅助按钮区域
     buttonsWidget = new QWidget(this);
     buttonsLayout = new QVBoxLayout(buttonsWidget);
     buttonsLayout->setContentsMargins(0, 0, 0, 0);
     buttonsLayout->setSpacing(5);
     buttonsWidget->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Expanding);
-    buttonsWidget->setFixedWidth(100);
-
+    buttonsWidget->setFixedWidth(100); // 确保按钮区域宽度固定
+    // 辅助按钮设定
     sendButton = new QPushButton("Send", this);
     sendButton->setObjectName("sendButton");
     sendButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     connect(sendButton, &QPushButton::clicked, this, &MainWindow::onSendButtonClicked);
-
     clearButton = new QPushButton("Clear", this);
     clearButton->setObjectName("clearButton");
     clearButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     connect(clearButton, &QPushButton::clicked, this, &MainWindow::onClearButtonClicked);
-
     closeChatButton = new QPushButton("Close", this);
     closeChatButton->setObjectName("closeChatButton");
     closeChatButton->setToolTip("Close window");
     closeChatButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     connect(closeChatButton, &QPushButton::clicked, this, &QMainWindow::close);
-
+    // 将按钮添加到按钮布局buttonsLayout中
     buttonsLayout->addWidget(sendButton, 1);
     buttonsLayout->addWidget(clearButton, 1);
     buttonsLayout->addWidget(closeChatButton, 1);
 
-    inputAreaLayout->addWidget(buttonsWidget);
-
+    inputAreaLayout->addWidget(buttonsWidget); // 将按钮区域添加到输入区域布局inputAreaLayout中
+    // 激活聊天内容布局中加入聊天记录显示区域、格式化工具栏区域和输入区域
     activeChatContentsLayout->addWidget(messageDisplay, 1);
     activeChatContentsLayout->addWidget(formattingToolbarWidget, 0);
     activeChatContentsLayout->addWidget(inputAreaWidget, 0);
-
+    // 聊天Stack的默认文本
     emptyChatPlaceholderLabel = new QLabel("Select a contact to start chatting or add a new one.", this);
     emptyChatPlaceholderLabel->setObjectName("emptyChatPlaceholderLabel");
     emptyChatPlaceholderLabel->setAlignment(Qt::AlignCenter);
@@ -189,33 +197,43 @@ void MainWindow::setupUI()
     chatStackedWidget->addWidget(activeChatContentsWidget);
 
     chatAreaLayout->addWidget(chatStackedWidget);
-    mainLayout->addWidget(chatAreaWidget, 1);
-    centralWidget->setLayout(mainLayout);
+    mainLayout->addWidget(chatAreaWidget, 1); // 设置聊天区域为主要伸缩区域
+    centralWidget->setLayout(mainLayout); 
 
-    chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel);
+    chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel); // 初始化时不选中联系人对话
 
     QTextCharFormat initialFormat;
-    if (fontFamilyComboBox->currentFont().pointSize() > 0) {
+    if (fontFamilyComboBox->currentFont().pointSize() > 0)
+    {
         initialFormat.setFont(fontFamilyComboBox->currentFont());
-    } else {
+    }
+    else
+    {
         initialFormat.setFontFamilies({QApplication::font().family()});
+        initialFormat.setFontPointSize(QApplication::font().pointSize());
     }
     bool sizeFound = false;
-    for (int i = 0; i < fontSizeComboBox->count(); ++i) {
-        if (fontSizeComboBox->itemText(i) == "12") {
+    for (int i = 0; i < fontSizeComboBox->count(); ++i)
+    {
+        if (fontSizeComboBox->itemText(i) == "12")
+        {
             fontSizeComboBox->setCurrentIndex(i);
             initialFormat.setFontPointSize(12);
             sizeFound = true;
             break;
         }
     }
-    if (!sizeFound && fontSizeComboBox->count() > 0) {
+    if (!sizeFound && fontSizeComboBox->count() > 0)
+    {
         fontSizeComboBox->setCurrentIndex(0);
         initialFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
-    } else if (!sizeFound) {
+    }
+    else if (!sizeFound)
+    {
         initialFormat.setFontPointSize(12);
     }
-    initialFormat.setForeground(currentTextColor); // 设置初始文本颜色
+    initialFormat.setForeground(currentTextColor);
+    initialFormat.setBackground(currentBgColor); // 设置初始背景色
     messageInputEdit->setCurrentCharFormat(initialFormat);
     onCurrentCharFormatChanged(messageInputEdit->currentCharFormat());
 }
@@ -224,13 +242,17 @@ void MainWindow::onClearButtonClicked()
 {
     messageInputEdit->clear();
     QTextCharFormat defaultFormat;
-    if (fontFamilyComboBox->currentFont().pointSize() > 0) {
+    if (fontFamilyComboBox->currentFont().pointSize() > 0)
+    {
         defaultFormat.setFont(fontFamilyComboBox->currentFont());
-    } else {
+    }
+    else
+    {
         defaultFormat.setFontFamilies({QApplication::font().family()});
     }
     defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
-    defaultFormat.setForeground(currentTextColor); // 保留当前文本颜色
+    defaultFormat.setForeground(currentTextColor);
+    defaultFormat.setBackground(currentBgColor); // 保留当前背景色
     messageInputEdit->setCurrentCharFormat(defaultFormat);
 }
 
@@ -241,48 +263,54 @@ void MainWindow::onAddContactButtonClicked()
 
 void MainWindow::handleContactAdded(const QString &name)
 {
-    if (chatHistories.find(name) == chatHistories.end()) {
+    if (chatHistories.find(name) == chatHistories.end())
+    {
         chatHistories[name] = QStringList();
     }
-    QListWidgetItem* newItem = new QListWidgetItem(name, contactListWidget);
+    QListWidgetItem *newItem = new QListWidgetItem(name, contactListWidget);
     contactListWidget->setCurrentItem(newItem);
 }
 
 void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *previous)
 {
     Q_UNUSED(previous);
-    if (current) {
+    if (current)
+    {
         currentOpenChatContactName = current->text();
-        
+
         QStringList messagesToDisplay;
-        if (chatHistories.contains(currentOpenChatContactName)) {
+        if (chatHistories.contains(currentOpenChatContactName))
+        {
             messagesToDisplay = chatHistories.value(currentOpenChatContactName);
-            if (messagesToDisplay.isEmpty()) {
+            if (messagesToDisplay.isEmpty())
+            {
                 QString welcomeMessageText = "Hello! How are you?";
                 QString welcomeMessageHtml = QString(
-                    "<div style=\"text-align: left; margin-bottom: 2px;\">"
-                    "<p style=\"margin:0; padding:0; text-align: left;\">"
-                    "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span><br> %2"
-                    "</p>"
-                    "</div>"
-                ).arg(currentOpenChatContactName.toHtmlEscaped())
-                 .arg(welcomeMessageText.toHtmlEscaped());
-                
+                                                 "<div style=\"text-align: left; margin-bottom: 2px;\">"
+                                                 "<p style=\"margin:0; padding:0; text-align: left;\">"
+                                                 "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span><br> %2"
+                                                 "</p>"
+                                                 "</div>")
+                                                 .arg(currentOpenChatContactName.toHtmlEscaped())
+                                                 .arg(welcomeMessageText.toHtmlEscaped());
+
                 chatHistories[currentOpenChatContactName].append(welcomeMessageHtml);
                 messagesToDisplay.append(welcomeMessageHtml);
             }
-        } else {
+        }
+        else
+        {
             chatHistories[currentOpenChatContactName] = QStringList();
             QString welcomeMessageText = "Hello! How are you?";
             QString welcomeMessageHtml = QString(
-                "<div style=\"text-align: left; margin-bottom: 2px;\">"
-                "<p style=\"margin:0; padding:0; text-align: left;\">"
-                "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span> %2"
-                "</p>"
-                "</div>"
-            ).arg(currentOpenChatContactName.toHtmlEscaped())
-             .arg(welcomeMessageText.toHtmlEscaped());
-            
+                                             "<div style=\"text-align: left; margin-bottom: 2px;\">"
+                                             "<p style=\"margin:0; padding:0; text-align: left;\">"
+                                             "<span style=\"font-weight: bold; background-color: #97c5f5; padding: 2px 6px; margin-right: 4px; border-radius: 3px;\">%1:</span> %2"
+                                             "</p>"
+                                             "</div>")
+                                             .arg(currentOpenChatContactName.toHtmlEscaped())
+                                             .arg(welcomeMessageText.toHtmlEscaped());
+
             chatHistories[currentOpenChatContactName].append(welcomeMessageHtml);
             messagesToDisplay.append(welcomeMessageHtml);
         }
@@ -291,14 +319,18 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
 
         messageInputEdit->clear();
         messageInputEdit->setFocus();
-        if (chatStackedWidget->currentWidget() != activeChatContentsWidget) {
+        if (chatStackedWidget->currentWidget() != activeChatContentsWidget)
+        {
             chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
         }
-    } else {
+    }
+    else
+    {
         currentOpenChatContactName.clear();
         messageDisplay->clear();
         messageInputEdit->clear();
-        if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel) {
+        if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel)
+        {
             chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel);
         }
     }
@@ -306,10 +338,12 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
 
 void MainWindow::onSendButtonClicked()
 {
-    if (currentOpenChatContactName.isEmpty()) return;
+    if (currentOpenChatContactName.isEmpty())
+        return;
 
     QString plainMessageText = messageInputEdit->toPlainText().trimmed();
-    if (!plainMessageText.isEmpty()) {
+    if (!plainMessageText.isEmpty())
+    {
         QString messageContentHtml = messageInputEdit->toHtml();
 
         QTextDocument doc;
@@ -317,39 +351,46 @@ void MainWindow::onSendButtonClicked()
         QString innerBodyHtml = doc.toHtml();
 
         QString coreContent = innerBodyHtml;
-        if (coreContent.startsWith("<p", Qt::CaseInsensitive) && coreContent.count("<p", Qt::CaseInsensitive) == 1 && coreContent.endsWith("</p>", Qt::CaseInsensitive)) {
+        if (coreContent.startsWith("<p", Qt::CaseInsensitive) && coreContent.count("<p", Qt::CaseInsensitive) == 1 && coreContent.endsWith("</p>", Qt::CaseInsensitive))
+        {
             int pTagEnd = coreContent.indexOf('>');
             int pEndTagStart = coreContent.lastIndexOf("</p>", -1, Qt::CaseInsensitive);
-            if (pTagEnd != -1 && pEndTagStart > pTagEnd) {
+            if (pTagEnd != -1 && pEndTagStart > pTagEnd)
+            {
                 coreContent = coreContent.mid(pTagEnd + 1, pEndTagStart - (pTagEnd + 1));
             }
         }
-        if (coreContent.trimmed().isEmpty() && !plainMessageText.isEmpty()) {
-             QTextDocumentFragment fragment = QTextDocumentFragment::fromHtml(messageInputEdit->toHtml());
-             coreContent = fragment.toHtml();
+        if (coreContent.trimmed().isEmpty() && !plainMessageText.isEmpty())
+        {
+            QTextDocumentFragment fragment = QTextDocumentFragment::fromHtml(messageInputEdit->toHtml());
+            coreContent = fragment.toHtml();
         }
 
         QString userMessageHtml = QString(
-            "<div style=\"text-align: right; margin-bottom: 2px;\">"
-            "<p style=\"margin:0; padding:0; text-align: right;\">"
-            "<span style=\"font-weight: bold; background-color: #a7dcb2; padding: 2px 6px; margin-left: 4px; border-radius: 3px;\">Me:</span> %1"
-            "</p>"
-            "</div>"
-        ).arg(coreContent);
+                                      "<div style=\"text-align: right; margin-bottom: 2px;\">"
+                                      "<p style=\"margin:0; padding:0; text-align: right;\">"
+                                      "<span style=\"font-weight: bold; background-color: #a7dcb2; padding: 2px 6px; margin-left: 4px; border-radius: 3px;\">Me:</span> %1"
+                                      "</p>"
+                                      "</div>")
+                                      .arg(coreContent);
 
         chatHistories[currentOpenChatContactName].append(userMessageHtml);
-        
+
         messageDisplay->addMessage(userMessageHtml);
-        
+
         messageInputEdit->clear();
         QTextCharFormat defaultFormat;
-        if (fontFamilyComboBox->currentFont().pointSize() > 0) {
+        if (fontFamilyComboBox->currentFont().pointSize() > 0)
+        {
             defaultFormat.setFont(fontFamilyComboBox->currentFont());
-        } else {
+        }
+        else
+        {
             defaultFormat.setFontFamilies({QApplication::font().family()});
         }
         defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
-        defaultFormat.setForeground(currentTextColor); // 保留当前文本颜色
+        defaultFormat.setForeground(currentTextColor);
+        defaultFormat.setBackground(currentBgColor); // 保留当前背景色
         messageInputEdit->setCurrentCharFormat(defaultFormat);
         onCurrentCharFormatChanged(defaultFormat);
 
@@ -385,7 +426,8 @@ void MainWindow::onFontSizeChanged(const QString &text)
 {
     bool ok;
     double pointSize = text.toDouble(&ok);
-    if (ok && pointSize > 0) {
+    if (ok && pointSize > 0)
+    {
         QTextCharFormat fmt;
         fmt.setFontPointSize(pointSize);
         messageInputEdit->mergeCurrentCharFormat(fmt);
@@ -405,16 +447,39 @@ void MainWindow::onFontFamilyChanged(const QFont &font)
 void MainWindow::onColorButtonClicked()
 {
     QColor color = QColorDialog::getColor(currentTextColor, this, "Select Text Color");
-    if (color.isValid()) {
+    if (color.isValid())
+    {
         currentTextColor = color;
-        
+
         // 更新颜色按钮样式
         QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(color.name());
         colorButton->setStyleSheet(colorStyle);
-        
+
         // 应用文本颜色
         QTextCharFormat fmt;
         fmt.setForeground(color);
+        messageInputEdit->mergeCurrentCharFormat(fmt);
+        messageInputEdit->setFocus();
+    }
+}
+
+// 实现背景色选择按钮点击事件
+void MainWindow::onBgColorButtonClicked()
+{
+    QColor color = QColorDialog::getColor(currentBgColor.isValid() ? currentBgColor : Qt::white,
+                                          this, "Select Background Color",
+                                          QColorDialog::ShowAlphaChannel);
+    if (color.isValid())
+    {
+        currentBgColor = color;
+
+        // 更新背景色按钮样式
+        QString bgColorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(color.name());
+        bgColorButton->setStyleSheet(bgColorStyle);
+
+        // 应用文本背景色
+        QTextCharFormat fmt;
+        fmt.setBackground(color);
         messageInputEdit->mergeCurrentCharFormat(fmt);
         messageInputEdit->setFocus();
     }
@@ -436,15 +501,21 @@ void MainWindow::onCurrentCharFormatChanged(const QTextCharFormat &format)
 
     fontSizeComboBox->blockSignals(true);
     int pointSize = static_cast<int>(format.fontPointSize() + 0.5);
-    if (pointSize <= 0 && format.font().pointSize() > 0) pointSize = format.font().pointSize();
-    if (pointSize <= 0) pointSize = QApplication::font().pointSize();
-    if (pointSize <= 0) pointSize = 12;
+    if (pointSize <= 0 && format.font().pointSize() > 0)
+        pointSize = format.font().pointSize();
+    if (pointSize <= 0)
+        pointSize = QApplication::font().pointSize();
+    if (pointSize <= 0)
+        pointSize = 12;
 
     QString sizeStr = QString::number(pointSize);
     int index = fontSizeComboBox->findText(sizeStr);
-    if (index != -1) {
+    if (index != -1)
+    {
         fontSizeComboBox->setCurrentIndex(index);
-    } else {
+    }
+    else
+    {
         fontSizeComboBox->setCurrentText(sizeStr);
     }
     fontSizeComboBox->blockSignals(false);
@@ -453,18 +524,30 @@ void MainWindow::onCurrentCharFormatChanged(const QTextCharFormat &format)
     QFont fontFromFormat = format.font();
     QStringList currentFamilies = fontFromFormat.families();
 
-    if (!currentFamilies.isEmpty()) {
+    if (!currentFamilies.isEmpty())
+    {
         fontFamilyComboBox->setCurrentFont(fontFromFormat);
-    } else {
+    }
+    else
+    {
         fontFamilyComboBox->setCurrentFont(fontFromFormat);
     }
     fontFamilyComboBox->blockSignals(false);
-    
+
     // 更新当前颜色
-    if (format.hasProperty(QTextFormat::ForegroundBrush)) {
+    if (format.hasProperty(QTextFormat::ForegroundBrush))
+    {
         currentTextColor = format.foreground().color();
         QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentTextColor.name());
         colorButton->setStyleSheet(colorStyle);
+    }
+
+    // 更新当前背景色
+    if (format.hasProperty(QTextFormat::BackgroundBrush))
+    {
+        currentBgColor = format.background().color();
+        QString bgColorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentBgColor.name());
+        bgColorButton->setStyleSheet(bgColorStyle);
     }
 }
 
@@ -559,12 +642,17 @@ void MainWindow::applyStyles()
             font-weight: bold;
         }
         
-        #colorButton {
+        #colorButton, #bgColorButton {
             min-width: 30px;
             max-width: 30px;
             min-height: 30px;
             max-height: 30px;
             border-radius: 4px;
+        }
+        
+        #bgColorButton {
+            background-image: url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAoAAAAKCAYAAACNMs+9AAAAGElEQVQYlWNgYGD4z0AEMBGkwIGJiQEKABUQAQCQ1ARCQV5unQAAAABJRU5ErkJggg==);
+            background-repeat: repeat;
         }
 
         #formattingToolbarWidget QPushButton:checked {
@@ -675,8 +763,9 @@ void MainWindow::applyStyles()
     underlineIconFont.setPixelSize(14);
     underlineButton->setFont(underlineIconFont);
 
-    boldButton->setFixedSize(30,30);
-    italicButton->setFixedSize(30,30);
-    underlineButton->setFixedSize(30,30);
-    colorButton->setFixedSize(30,30);
+    boldButton->setFixedSize(30, 30);
+    italicButton->setFixedSize(30, 30);
+    underlineButton->setFixedSize(30, 30);
+    colorButton->setFixedSize(30, 30);
+    bgColorButton->setFixedSize(30, 30);
 }
