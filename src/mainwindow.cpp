@@ -17,6 +17,7 @@
 #include <QTextCharFormat>
 #include <QTextDocumentFragment>
 #include <QScrollBar>
+#include <QColorDialog> // 添加颜色对话框头文件
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent)
@@ -26,6 +27,9 @@ MainWindow::MainWindow(QWidget *parent)
     contactManager = new ContactManager(this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
 
+    // 初始化默认文本颜色为黑色
+    currentTextColor = QColor(Qt::black);
+    
     setupUI();
     applyStyles();
     setWindowTitle("Chat Application");
@@ -104,6 +108,15 @@ void MainWindow::setupUI()
     underlineButton = new QPushButton("U", this);
     underlineButton->setCheckable(true);
     connect(underlineButton, &QPushButton::toggled, this, &MainWindow::onUnderlineButtonToggled);
+    
+    // 创建颜色按钮
+    colorButton = new QPushButton(this);
+    colorButton->setObjectName("colorButton");
+    colorButton->setToolTip("Text Color");
+    // 设置初始颜色为黑色
+    QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentTextColor.name());
+    colorButton->setStyleSheet(colorStyle);
+    connect(colorButton, &QPushButton::clicked, this, &MainWindow::onColorButtonClicked);
 
     fontSizeComboBox = new QComboBox(this);
     for (int i = 8; i <= 28; i += 2) {
@@ -117,6 +130,7 @@ void MainWindow::setupUI()
     formattingToolbarLayout->addWidget(boldButton);
     formattingToolbarLayout->addWidget(italicButton);
     formattingToolbarLayout->addWidget(underlineButton);
+    formattingToolbarLayout->addWidget(colorButton);  // 添加颜色按钮到工具栏
     formattingToolbarLayout->addWidget(fontSizeComboBox);
     formattingToolbarLayout->addWidget(fontFamilyComboBox, 1);
 
@@ -201,6 +215,7 @@ void MainWindow::setupUI()
     } else if (!sizeFound) {
         initialFormat.setFontPointSize(12);
     }
+    initialFormat.setForeground(currentTextColor); // 设置初始文本颜色
     messageInputEdit->setCurrentCharFormat(initialFormat);
     onCurrentCharFormatChanged(messageInputEdit->currentCharFormat());
 }
@@ -215,6 +230,7 @@ void MainWindow::onClearButtonClicked()
         defaultFormat.setFontFamilies({QApplication::font().family()});
     }
     defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
+    defaultFormat.setForeground(currentTextColor); // 保留当前文本颜色
     messageInputEdit->setCurrentCharFormat(defaultFormat);
 }
 
@@ -333,6 +349,7 @@ void MainWindow::onSendButtonClicked()
             defaultFormat.setFontFamilies({QApplication::font().family()});
         }
         defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
+        defaultFormat.setForeground(currentTextColor); // 保留当前文本颜色
         messageInputEdit->setCurrentCharFormat(defaultFormat);
         onCurrentCharFormatChanged(defaultFormat);
 
@@ -384,6 +401,25 @@ void MainWindow::onFontFamilyChanged(const QFont &font)
     messageInputEdit->setFocus();
 }
 
+// 实现颜色选择按钮点击事件
+void MainWindow::onColorButtonClicked()
+{
+    QColor color = QColorDialog::getColor(currentTextColor, this, "Select Text Color");
+    if (color.isValid()) {
+        currentTextColor = color;
+        
+        // 更新颜色按钮样式
+        QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(color.name());
+        colorButton->setStyleSheet(colorStyle);
+        
+        // 应用文本颜色
+        QTextCharFormat fmt;
+        fmt.setForeground(color);
+        messageInputEdit->mergeCurrentCharFormat(fmt);
+        messageInputEdit->setFocus();
+    }
+}
+
 void MainWindow::onCurrentCharFormatChanged(const QTextCharFormat &format)
 {
     boldButton->blockSignals(true);
@@ -423,6 +459,13 @@ void MainWindow::onCurrentCharFormatChanged(const QTextCharFormat &format)
         fontFamilyComboBox->setCurrentFont(fontFromFormat);
     }
     fontFamilyComboBox->blockSignals(false);
+    
+    // 更新当前颜色
+    if (format.hasProperty(QTextFormat::ForegroundBrush)) {
+        currentTextColor = format.foreground().color();
+        QString colorStyle = QString("background-color: %1; border: 1px solid #cccccc;").arg(currentTextColor.name());
+        colorButton->setStyleSheet(colorStyle);
+    }
 }
 
 void MainWindow::applyStyles()
@@ -515,6 +558,15 @@ void MainWindow::applyStyles()
             max-width: 30px;
             font-weight: bold;
         }
+        
+        #colorButton {
+            min-width: 30px;
+            max-width: 30px;
+            min-height: 30px;
+            max-height: 30px;
+            border-radius: 4px;
+        }
+
         #formattingToolbarWidget QPushButton:checked {
             background-color: #cce5ff;
             border: 1px solid #0078d4;
@@ -626,4 +678,5 @@ void MainWindow::applyStyles()
     boldButton->setFixedSize(30,30);
     italicButton->setFixedSize(30,30);
     underlineButton->setFixedSize(30,30);
+    colorButton->setFixedSize(30,30);
 }

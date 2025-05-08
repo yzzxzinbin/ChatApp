@@ -19,6 +19,7 @@ class QWidget;
 class QFontComboBox;
 class QComboBox;
 class QTextCharFormat; // For formatting
+class QColor; // For color selection
 
 class ContactManager;
 QT_END_NAMESPACE
@@ -57,8 +58,10 @@ private:
     QPushButton *boldButton;
     QPushButton *italicButton;
     QPushButton *underlineButton;
+    QPushButton *colorButton; // 添加颜色按钮
     QComboBox *fontSizeComboBox;
     QFontComboBox *fontFamilyComboBox;
+    QColor currentTextColor; // 当前文本颜色
 
     QWidget *inputAreaWidget;
     QHBoxLayout *inputAreaLayout;
@@ -92,6 +95,7 @@ private slots:
     void onBoldButtonToggled(bool checked);
     void onItalicButtonToggled(bool checked);
     void onUnderlineButtonToggled(bool checked);
+    void onColorButtonClicked(); // 添加颜色按钮点击处理
     void onFontSizeChanged(const QString &text);
     void onFontFamilyChanged(const QFont &font);
     void onCurrentCharFormatChanged(const QTextCharFormat &format);
