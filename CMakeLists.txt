@@ -32,6 +32,10 @@ set(PROJECT_SOURCES
         src/styleutils.cpp
         src/formattingtoolbarhandler.h
         src/formattingtoolbarhandler.cpp
+        src/networkeventhandler.h
+        src/networkeventhandler.cpp
+        
+        src/setupmainstyle.cpp
         src/resources.qrc
 )
 

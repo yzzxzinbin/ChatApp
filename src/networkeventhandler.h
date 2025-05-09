@@ -3,18 +3,17 @@
 
 #include <QObject>
 #include <QAbstractSocket> // For SocketError
+#include <QStringList>     // Include for QStringList
+#include <QMap>            // Include for QMap
 
 QT_BEGIN_NAMESPACE
 class NetworkManager;
 class QListWidget;
-class QListWidgetItem;
 class ChatMessageDisplay;
 class PeerInfoWidget;
 class QStackedWidget;
 class QTextEdit;
 class QLabel;
-template <class Key, class T> class QMap; // Forward declare QMap
-class QStringList;
 class MainWindow; // Forward declaration
 QT_END_NAMESPACE
 

@@ -28,6 +28,7 @@ class ContactManager;
 class SettingsDialog; // Forward declaration
 class PeerInfoWidget; // Forward declaration for our new widget
 class FormattingToolbarHandler; // Forward declaration for the new handler
+class NetworkEventHandler; // Forward declaration for network event handler
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
@@ -39,6 +40,11 @@ public:
     ~MainWindow();
     QString getLocalUserName() const;
     QString getLocalUserUuid() const; // 新增
+    void updateNetworkStatus(const QString &status); // Make updateNetworkStatus public
+    void loadOrCreateUserIdentity(); // 新增方法
+
+public slots:
+    void handleContactAdded(const QString &name, const QString &uuid); // Re-declared as public slot
 
 private:
     // Declare widgets and layouts
@@ -104,14 +110,13 @@ private:
 
     PeerInfoWidget *peerInfoDisplayWidget; // New widget instance
     FormattingToolbarHandler *formattingHandler; // New handler instance
+    NetworkEventHandler *networkEventHandler; // New network event handler instance
 
     void setupUI();
-    void loadOrCreateUserIdentity(); // 新增方法
 
 private slots:
     void onClearButtonClicked();
     void onAddContactButtonClicked();
-    void handleContactAdded(const QString &name, const QString &uuid); // Modified to include UUID
     void onContactSelected(QListWidgetItem *current, QListWidgetItem *previous);
     void onSendButtonClicked();
     void onSettingsButtonClicked(); // 设置按钮的槽函数
@@ -119,24 +124,8 @@ private slots:
                                quint16 listenPort,
                                quint16 outgoingPort, bool useSpecificOutgoingPort); // 处理设置应用的槽函数
 
-    // NetworkManager slots
-    void handleNetworkConnected();
-    void handleNetworkDisconnected();
-    void handleNewMessageReceived(const QString &message);
-    void handleNetworkError(QAbstractSocket::SocketError socketError);
-    void updateNetworkStatus(const QString &status);
-    // Modified to include UUID and name hint
+    // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)
     void handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
-
-    // Formatting related slots are now removed, will be handled by FormattingToolbarHandler
-    // void onBoldButtonToggled(bool checked);
-    // void onItalicButtonToggled(bool checked);
-    // void onUnderlineButtonToggled(bool checked);
-    // void onColorButtonClicked();
-    // void onBgColorButtonClicked();
-    // void onFontSizeChanged(const QString &text);
-    // void onFontFamilyChanged(const QFont &font);
-    // void onCurrentCharFormatChanged(const QTextCharFormat &format);
 
     // New slots to update MainWindow's color state from FormattingToolbarHandler
     void handleTextColorChanged(const QColor &color);

@@ -3,6 +3,7 @@
         "*.sqlbook": "sql",
         "*.ndjson": "jsonl",
         "*.dbclient-js": "javascript",
-        "new": "cpp"
+        "new": "cpp",
+        "qstackedwidget": "cpp"
     }
 }
