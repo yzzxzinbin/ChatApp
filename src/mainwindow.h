@@ -44,7 +44,7 @@ public:
     void loadOrCreateUserIdentity(); // 新增方法
 
 public slots:
-    void handleContactAdded(const QString &name, const QString &uuid); // Re-declared as public slot
+    void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port); // 更新签名以包含IP和端口，用于持久化
 
 private:
     // Declare widgets and layouts
@@ -113,6 +113,9 @@ private:
     NetworkEventHandler *networkEventHandler; // New network event handler instance
 
     void setupUI();
+    // 新增：联系人持久化和重连方法
+    void saveContacts();
+    void loadContactsAndAttemptReconnection();
 
 private slots:
     void onClearButtonClicked();
