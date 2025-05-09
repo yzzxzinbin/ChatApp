@@ -3,10 +3,12 @@
 
 #include <QObject>
 #include <QString>
-#include "addcontactdialog.h" // Include the new dialog
+#include <QPointer> // 新增：包含 QPointer
+// #include "addcontactdialog.h" // AddContactDialog 的完整定义现在不需要在这里，前向声明足够
 
 // Forward declaration
 class NetworkManager;
+class AddContactDialog; // 前向声明 AddContactDialog
 
 class ContactManager : public QObject
 {
@@ -26,10 +28,11 @@ private slots:
     // 新的槽函数，用于处理来自 NetworkManager 的信号
     void handlePeerSessionEstablished(const QString &peerUuid, const QString &peerName, const QString& peerAddress, quint16 peerPort);
     void handleOutgoingConnectionAttemptFailed(const QString& peerNameAttempted, const QString& reason);
+    void onDialogFinished(int result); // 新增槽：处理对话框关闭事件
 
 private:
     NetworkManager* netManager; // Store a pointer to NetworkManager
-    AddContactDialog* currentAddDialog; // Pointer to the currently open dialog
+    QPointer<AddContactDialog> currentAddDialog; // 修改类型为 QPointer
     QString pendingContactName; // Name of the contact being added
 };
 

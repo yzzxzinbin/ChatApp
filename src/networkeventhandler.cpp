@@ -56,7 +56,7 @@ void NetworkEventHandler::handlePeerConnected(const QString &peerUuid, const QSt
                 itemToSelect->setText(peerName);
             }
             // 确保图标更新为在线
-            itemToSelect->setIcon(QIcon(":/icons/online.png"));
+            itemToSelect->setIcon(QIcon(":/icons/online.svg"));
             break;
         }
     }
@@ -100,7 +100,7 @@ void NetworkEventHandler::handlePeerDisconnected(const QString &peerUuid)
     mainWindowPtr->updateNetworkStatus(tr("Peer '%1' (UUID: %2) disconnected.").arg(peerName).arg(peerUuid));
 
     if (disconnectedItem) {
-        disconnectedItem->setIcon(QIcon(":/icons/offline.png"));
+        disconnectedItem->setIcon(QIcon(":/icons/offline.svg"));
     }
 
     if (contactListWidget->currentItem() && contactListWidget->currentItem()->data(Qt::UserRole).toString() == peerUuid) {

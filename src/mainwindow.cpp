@@ -325,7 +325,7 @@ void MainWindow::handleContactAdded(const QString &name, const QString &uuid, co
         itemToSelect->setData(Qt::UserRole + 1, ip);   // Store IP
         itemToSelect->setData(Qt::UserRole + 2, port); // Store Port
         // 初始设置为离线图标，连接成功后 NetworkEventHandler 会更新
-        itemToSelect->setIcon(QIcon(":/icons/offline.png"));
+        itemToSelect->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg
     }
 
 
@@ -639,7 +639,7 @@ void MainWindow::loadContactsAndAttemptReconnection() {
             if(contactListWidget->item(j)->data(Qt::UserRole).toString() == uuid) {
                 contactListWidget->item(j)->setText(name); // 更新名称
                 contactListWidget->item(j)->setData(Qt::UserRole + 1, ip);
-                contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.png"));
+                contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg
                 found = true;
                 break;
             }
@@ -648,7 +648,7 @@ void MainWindow::loadContactsAndAttemptReconnection() {
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
             item->setData(Qt::UserRole, uuid);
             item->setData(Qt::UserRole + 1, ip);
-            item->setIcon(QIcon(":/icons/offline.png")); // 初始设置为离线
+            item->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg // 初始设置为离线
              if (chatHistories.find(uuid) == chatHistories.end()) {
                 chatHistories[uuid] = QStringList();
             }
