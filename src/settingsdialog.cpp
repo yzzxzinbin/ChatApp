@@ -14,12 +14,14 @@
 SettingsDialog::SettingsDialog(const QString &currentUserName,
                                const QString &currentUserUuid,
                                quint16 currentListenPort,
+                               bool currentEnableListening,
                                quint16 currentOutgoingPort, bool useSpecificOutgoingPort,
                                QWidget *parent)
     : QDialog(parent),
       initialUserName(currentUserName),
       initialUserUuid(currentUserUuid),
       initialListenPort(currentListenPort),
+      initialEnableListening(currentEnableListening),
       initialOutgoingPort(currentOutgoingPort), initialUseSpecificOutgoingPort(useSpecificOutgoingPort)
 {
     setupUI();
@@ -30,6 +32,9 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
     userUuidEdit->setText(currentUserUuid);
 
     // 初始化监听端口设置
+    enableListeningCheckBox->setChecked(currentEnableListening);
+    listenPortSpinBox->setEnabled(currentEnableListening);
+    retryListenButton->setEnabled(currentEnableListening); // 新增：根据复选框状态设置按钮可用性
     if (currentListenPort > 0) {
         listenPortSpinBox->setValue(currentListenPort);
     } else {
@@ -46,24 +51,27 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
     onOutgoingPortSettingsChanged();
 }
 
-void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, quint16 outgoingPort, bool useSpecificOutgoing)
+void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, bool enableListening, quint16 outgoingPort, bool useSpecificOutgoing)
 {
     userNameEdit->setText(userName);
-    userUuidEdit->setText(uuid); // UUID is read-only, but good to refresh if it could ever change (though unlikely)
+    userUuidEdit->setText(uuid);
 
+    enableListeningCheckBox->setChecked(enableListening);
+    listenPortSpinBox->setEnabled(enableListening);
+    retryListenButton->setEnabled(enableListening); // 新增：根据复选框状态更新按钮可用性
     if (listenPort > 0) {
         listenPortSpinBox->setValue(listenPort);
     } else {
-        listenPortSpinBox->setValue(60248); // Default fallback
+        listenPortSpinBox->setValue(60248);
     }
 
     specifyOutgoingPortCheckBox->setChecked(useSpecificOutgoing);
     if (useSpecificOutgoing && outgoingPort > 0) {
         outgoingPortSpinBox->setValue(outgoingPort);
     } else {
-        outgoingPortSpinBox->setValue(0); // Default for dynamic or if not specified
+        outgoingPortSpinBox->setValue(0);
     }
-    onOutgoingPortSettingsChanged(); // Ensure dependent UI state is correct
+    onOutgoingPortSettingsChanged();
 }
 
 void SettingsDialog::setupUI()
@@ -86,14 +94,22 @@ void SettingsDialog::setupUI()
     mainLayout->addWidget(userProfileGroup);
 
     // Network Listening Port Section
-    QGroupBox *listenPortGroup = new QGroupBox(tr("Network Listening Port (for incoming connections)"), this);
+    QGroupBox *listenPortGroup = new QGroupBox(tr("Network Listening (for incoming connections)"), this);
     QFormLayout *listenPortFormLayout = new QFormLayout();
+
+    enableListeningCheckBox = new QCheckBox(tr("Enable Network Listening"), this);
+    connect(enableListeningCheckBox, &QCheckBox::toggled, this, &SettingsDialog::onEnableListeningChanged);
 
     listenPortSpinBox = new QSpinBox(this);
     listenPortSpinBox->setRange(1, 65535);
     listenPortSpinBox->setValue(60248);
 
+    retryListenButton = new QPushButton(tr("Attempt Listen Now"), this); // 新增按钮
+    connect(retryListenButton, &QPushButton::clicked, this, &SettingsDialog::onRetryListenNowClicked); // 新增连接
+
+    listenPortFormLayout->addRow(enableListeningCheckBox);
     listenPortFormLayout->addRow(tr("Listen on Port:"), listenPortSpinBox);
+    listenPortFormLayout->addRow(retryListenButton); // 新增按钮到布局
     listenPortGroup->setLayout(listenPortFormLayout);
     mainLayout->addWidget(listenPortGroup);
 
@@ -136,6 +152,17 @@ void SettingsDialog::setupUI()
     setLayout(mainLayout);
 }
 
+void SettingsDialog::onEnableListeningChanged(bool checked)
+{
+    listenPortSpinBox->setEnabled(checked);
+    retryListenButton->setEnabled(checked); // 新增：控制按钮的可用性
+}
+
+void SettingsDialog::onRetryListenNowClicked() // 新增槽函数实现
+{
+    emit retryListenNowRequested();
+}
+
 void SettingsDialog::onOutgoingPortSettingsChanged()
 {
     outgoingPortSpinBox->setEnabled(specifyOutgoingPortCheckBox->isChecked());
@@ -150,11 +177,15 @@ void SettingsDialog::onSaveButtonClicked()
         return;
     }
 
-    quint16 listenPort = static_cast<quint16>(listenPortSpinBox->value());
-    if (listenPort == 0) {
-        QMessageBox::warning(this, tr("Input Error"), tr("Listen port cannot be 0."));
-        listenPortSpinBox->setFocus();
-        return;
+    bool enableListening = enableListeningCheckBox->isChecked();
+    quint16 listenPort = 0;
+    if (enableListening) {
+        listenPort = static_cast<quint16>(listenPortSpinBox->value());
+        if (listenPort == 0) {
+            QMessageBox::warning(this, tr("Input Error"), tr("Listen port cannot be 0 when listening is enabled."));
+            listenPortSpinBox->setFocus();
+            return;
+        }
     }
 
     bool useSpecificOutgoing = specifyOutgoingPortCheckBox->isChecked();
@@ -163,7 +194,7 @@ void SettingsDialog::onSaveButtonClicked()
         outgoingPort = static_cast<quint16>(outgoingPortSpinBox->value());
     }
 
-    emit settingsApplied(userName, listenPort, outgoingPort, useSpecificOutgoing);
+    emit settingsApplied(userName, listenPort, enableListening, outgoingPort, useSpecificOutgoing);
     accept();
 }
 
@@ -174,7 +205,15 @@ QString SettingsDialog::getUserName() const
 
 quint16 SettingsDialog::getListenPort() const
 {
-    return static_cast<quint16>(listenPortSpinBox->value());
+    if (enableListeningCheckBox->isChecked()) {
+        return static_cast<quint16>(listenPortSpinBox->value());
+    }
+    return 0;
+}
+
+bool SettingsDialog::isListeningEnabled() const
+{
+    return enableListeningCheckBox->isChecked();
 }
 
 quint16 SettingsDialog::getOutgoingPort() const

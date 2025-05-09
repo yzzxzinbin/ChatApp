@@ -7,6 +7,8 @@
 #include <QHostAddress>
 #include <QMap>
 #include <QStringList> // For getConnectedPeerUuids
+#include <QNetworkInterface> // Required for getting local IP addresses
+#include <QTimer> // 新增：用于重试监听
 
 class NetworkManager : public QObject
 {
@@ -20,7 +22,7 @@ public:
     bool startListening();
     
     // 设置监听首选项
-    void setListenPreferences(quint16 port);
+    void setListenPreferences(quint16 port, bool autoStartListen); // 修改签名
     // 设置传出连接首选项
     void setOutgoingConnectionPreferences(quint16 port, bool useSpecific);
     
@@ -105,6 +107,7 @@ private slots:
     // 处理出站连接的socket错误
     void handleOutgoingSocketError(QAbstractSocket::SocketError socketError);
 
+    void attemptToListen(); // 新增：重试监听的槽
 
 private:
     QTcpServer *tcpServer;      // TCP服务器对象
@@ -129,6 +132,10 @@ private:
     QString localUserUuid;
     QString localUserDisplayName;
 
+    bool autoStartListeningEnabled; // 新增：用户是否启用了监听
+    QTimer *retryListenTimer;       // 新增：重试监听的计时器
+    int retryListenIntervalMs;      // 新增：重试间隔
+
     void setupServer();
     void cleanupSocket(QTcpSocket* socket, bool removeFromConnectedSockets = true);
     void sendSystemMessage(QTcpSocket* socket, const QString& sysMessage);
@@ -138,6 +145,10 @@ private:
     void removePendingIncomingSocket(QTcpSocket* socket);
     // 从outgoingSocketsAwaitingSessionAccepted中移除socket并断开其临时信号槽
     void removeOutgoingSocketAwaitingAcceptance(QTcpSocket* socket);
+
+    // 新增辅助方法
+    QList<QHostAddress> getLocalIpAddresses() const;
+    bool isSelfConnection(const QString& targetHost, quint16 targetPort) const;
 };
 
 #endif // NETWORKMANAGER_H

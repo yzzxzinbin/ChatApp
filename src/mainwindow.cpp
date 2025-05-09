@@ -29,6 +29,7 @@
 #include <QInputDialog> // For naming incoming connections
 #include <QUuid>
 #include <QSettings>
+#include <QDebug> // Ensure QDebug is included for qDebug()
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
@@ -36,6 +37,7 @@ MainWindow::MainWindow(QWidget *parent)
       localUserName(tr("Me")),       // 默认用户名
       localUserUuid(QString()),      // 初始化UUID为空
       localListenPort(60248),        // 默认监听端口 60248
+      autoNetworkListeningEnabled(true), // 新增：默认启用监听
       localOutgoingPort(0),          // 默认传出端口为0 (动态)
       useSpecificOutgoingPort(false) // 默认不指定传出端口
 {
@@ -49,7 +51,7 @@ MainWindow::MainWindow(QWidget *parent)
     networkManager = new NetworkManager(this);
     networkManager->setLocalUserDetails(localUserUuid, localUserName); // 设置本地用户信息
     // 在 NetworkManager 启动监听前设置初始首选项
-    networkManager->setListenPreferences(localListenPort);
+    networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled); // 传递启用状态
     // 设置初始传出连接首选项
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
 
@@ -94,11 +96,17 @@ MainWindow::MainWindow(QWidget *parent)
     // 注意：NetworkManager 中的信号已重命名为 incomingSessionRequest
     connect(networkManager, &NetworkManager::incomingSessionRequest, this, &MainWindow::handleIncomingConnectionRequest);
 
-    // 应用启动后默认开启端口监听
-    networkManager->startListening();
+    // 修改点：将启动监听的动作移到重连尝试之后
 
-    // 新增：加载联系人并尝试重连
+    // 1. 首先尝试加载联系人并重连 (此时不监听)
     loadContactsAndAttemptReconnection();
+
+    // 2. 重连阶段结束后，再根据设置决定是否开始监听端口
+    if (autoNetworkListeningEnabled) { // 检查用户设置
+        networkManager->startListening();
+    } else {
+        updateNetworkStatus(tr("Network listening is disabled in settings."));
+    }
 }
 
 MainWindow::~MainWindow()
@@ -112,11 +120,20 @@ MainWindow::~MainWindow()
 void MainWindow::loadOrCreateUserIdentity()
 {
     QSettings settings;
+    // Log the settings file path being used by this instance
+    qDebug() << "MW::loadOrCreateUserIdentity: Instance using settings file:" << settings.fileName();
+    qDebug() << "MW::loadOrCreateUserIdentity: Application Name for QSettings:" << QCoreApplication::applicationName();
+
     localUserUuid = settings.value("User/LocalUUID").toString();
     if (localUserUuid.isEmpty())
     {
         localUserUuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
         settings.setValue("User/LocalUUID", localUserUuid);
+        qDebug() << "MW::loadOrCreateUserIdentity: Created new UUID:" << localUserUuid;
+    }
+    else
+    {
+        qDebug() << "MW::loadOrCreateUserIdentity: Loaded existing UUID:" << localUserUuid;
     }
     // 如果之前没有保存用户名，则使用默认的 "Me"，否则加载已保存的
     localUserName = settings.value("User/LocalUserName", tr("Me")).toString();
@@ -127,12 +144,13 @@ void MainWindow::loadOrCreateUserIdentity()
     }
     // 加载端口设置
     localListenPort = settings.value("User/ListenPort", 60248).toUInt();
+    autoNetworkListeningEnabled = settings.value("User/AutoNetworkListeningEnabled", true).toBool(); // 新增加载
     localOutgoingPort = settings.value("User/OutgoingPort", 0).toUInt();
     useSpecificOutgoingPort = settings.value("User/UseSpecificOutgoingPort", false).toBool();
 
     // 更新NetworkManager的设置，以防它们在settingsDialog之外被更改（例如，首次运行）
     if (networkManager) {
-        networkManager->setListenPreferences(localListenPort);
+        networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled); // 传递启用状态
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
     }
 }
@@ -175,46 +193,66 @@ void MainWindow::onSettingsButtonClicked()
     // 使用现有的对话框实例，或者如果不存在则创建
     if (!settingsDialog)
     {
-        settingsDialog = new SettingsDialog(localUserName, // 传递当前用户名
-                                            localUserUuid, // 传递UUID
+        settingsDialog = new SettingsDialog(localUserName,
+                                            localUserUuid,
                                             localListenPort,
+                                            autoNetworkListeningEnabled,
                                             localOutgoingPort, useSpecificOutgoingPort,
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
+        connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNow); // 新增连接
     }
     else
     {
         // Update dialog with current settings if it already exists
-        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, localOutgoingPort, useSpecificOutgoingPort);
+        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, autoNetworkListeningEnabled, localOutgoingPort, useSpecificOutgoingPort);
     }
     settingsDialog->exec(); // 以模态方式显示对话框
 }
 
 void MainWindow::handleSettingsApplied(const QString &userName,
                                        quint16 listenPort,
+                                       bool enableListening,
                                        quint16 outgoingPort, bool useSpecificOutgoingPortVal)
 {
     bool settingsChanged = false;
-    bool networkRestartNeeded = false;
-    QSettings settings; // For saving
+    QSettings settings; 
+    bool listeningPrefsChanged = false; // 重命名以更清晰
 
     if (localUserName != userName)
     {
         localUserName = userName;
-        settings.setValue("User/LocalUserName", localUserName); // 保存更改的用户名
+        settings.setValue("User/LocalUserName", localUserName);
         if (networkManager)
         {
-            networkManager->setLocalUserDetails(localUserUuid, localUserName); // 通知NetworkManager
+            networkManager->setLocalUserDetails(localUserUuid, localUserName);
         }
         settingsChanged = true;
     }
 
-    if (localListenPort != listenPort)
-    {
+    if (localListenPort != listenPort) {
         localListenPort = listenPort;
-        settings.setValue("User/ListenPort", localListenPort); // 保存监听端口
+        settings.setValue("User/ListenPort", localListenPort);
         settingsChanged = true;
-        networkRestartNeeded = true; // 监听端口更改需要重启监听
+        listeningPrefsChanged = true;
+    }
+    // 检查监听启用状态是否改变
+    if (autoNetworkListeningEnabled != enableListening) {
+        autoNetworkListeningEnabled = enableListening;
+        settings.setValue("User/AutoNetworkListeningEnabled", autoNetworkListeningEnabled);
+        settingsChanged = true;
+        listeningPrefsChanged = true;
+    }
+
+    if (listeningPrefsChanged) {
+        networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
+        if (autoNetworkListeningEnabled) {
+            updateNetworkStatus(tr("Listener settings changed. Attempting to start listener..."));
+            networkManager->startListening(); // 明确尝试启动监听
+        } else {
+            updateNetworkStatus(tr("Network listening disabled. Stopping listener..."));
+            networkManager->stopListening(); // 明确停止监听
+        }
     }
 
     if (localOutgoingPort != outgoingPort || useSpecificOutgoingPort != useSpecificOutgoingPortVal)
@@ -225,28 +263,33 @@ void MainWindow::handleSettingsApplied(const QString &userName,
         settings.setValue("User/UseSpecificOutgoingPort", useSpecificOutgoingPort); // 保存选项
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
         settingsChanged = true;
-        // 传出端口设置更改不需要重启监听，它会在下次连接时生效
         updateNetworkStatus(tr("Outgoing port preference updated. Will apply to new connections."));
-    }
-
-    if (networkRestartNeeded)
-    {
-        updateNetworkStatus(tr("Listen port settings changed. Restarting listener..."));
-        networkManager->setListenPreferences(localListenPort);
-        networkManager->stopListening();  // 显式停止
-        networkManager->startListening(); // 使用新设置重新启动
     }
 
     if (settingsChanged)
     {
-        updateNetworkStatus(tr("Settings applied. User: %1, Listen Port: %2, Outgoing Port: %3")
+        updateNetworkStatus(tr("Settings applied. User: %1, Listening: %2 (Port: %3), Outgoing Port: %4")
                                 .arg(localUserName)
+                                .arg(autoNetworkListeningEnabled ? tr("Enabled") : tr("Disabled")) // 显示监听状态
                                 .arg(QString::number(localListenPort))
                                 .arg(useSpecificOutgoingPort && localOutgoingPort > 0 ? QString::number(localOutgoingPort) : tr("Dynamic")));
     }
-    else if (!networkRestartNeeded)
+    else if (!listeningPrefsChanged)
     { // 避免在仅重启网络时显示 "unchanged"
         updateNetworkStatus(tr("Settings unchanged."));
+    }
+}
+
+void MainWindow::handleRetryListenNow() // 新增槽函数实现
+{
+    if (networkManager) {
+        if (autoNetworkListeningEnabled) {
+            updateNetworkStatus(tr("Attempting to listen on port %1 now...").arg(localListenPort));
+            networkManager->startListening();
+        } else {
+            updateNetworkStatus(tr("Cannot attempt to listen: Network listening is disabled in settings."));
+            QMessageBox::information(this, tr("Listening Disabled"), tr("Network listening is currently disabled in settings. Please enable it first."));
+        }
     }
 }
 
@@ -499,6 +542,7 @@ void MainWindow::updateNetworkStatus(const QString &status)
 
 void MainWindow::handleIncomingConnectionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
 {
+    qDebug() << "MW::handleIncomingConnectionRequest: From" << peerAddress << ":" << peerPort << "PeerUUID:" << peerUuid << "NameHint:" << peerNameHint;
     QMessageBox::StandardButton reply;
     QString suggestedName = peerNameHint.isEmpty() ? peerAddress : peerNameHint;
 

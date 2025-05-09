@@ -105,7 +105,8 @@ private:
     QString localUserName;
     QString localUserUuid; // 新增：本地用户的UUID
     quint16 localListenPort;
-    quint16 localOutgoingPort;         // 新增：传出连接的源端口
+    bool autoNetworkListeningEnabled; // 新增：用户是否启用了网络监听
+    quint16 localOutgoingPort;
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
     PeerInfoWidget *peerInfoDisplayWidget; // New widget instance
@@ -125,7 +126,9 @@ private slots:
     void onSettingsButtonClicked(); // 设置按钮的槽函数
     void handleSettingsApplied(const QString &userName,
                                quint16 listenPort,
+                               bool enableListening, // 新增
                                quint16 outgoingPort, bool useSpecificOutgoingPort); // 处理设置应用的槽函数
+    void handleRetryListenNow(); // 新增槽函数
 
     // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)
     // 更新签名以匹配 NetworkManager::incomingSessionRequest
