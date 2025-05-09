@@ -26,7 +26,7 @@ private slots:
     // Slots to handle NetworkManager's connection results
     void onConnectionSuccess();
     void onConnectionFailed();
-
+    void onTcpLinkEstablished(const QString& tentativePeerName); // 新槽
 
 private:
     NetworkManager* netManager; // Store a pointer to NetworkManager

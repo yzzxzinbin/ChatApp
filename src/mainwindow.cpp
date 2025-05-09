@@ -370,12 +370,30 @@ void MainWindow::handleSettingsApplied(const QString &userName,
 
 void MainWindow::handleContactAdded(const QString &name)
 {
-    if (chatHistories.find(name) == chatHistories.end())
-    {
-        chatHistories[name] = QStringList();
+    if (name.isEmpty()) {
+        return; // 如果名称为空，则不执行任何操作
     }
-    QListWidgetItem *newItem = new QListWidgetItem(name, contactListWidget);
-    contactListWidget->setCurrentItem(newItem);
+
+    // 检查 contactListWidget 中是否已存在同名项
+    QList<QListWidgetItem*> existingItems = contactListWidget->findItems(name, Qt::MatchExactly);
+    QListWidgetItem *itemToSelect = nullptr;
+
+    if (existingItems.isEmpty()) {
+        // 如果不存在，则创建新项并添加到 contactListWidget
+        itemToSelect = new QListWidgetItem(name, contactListWidget);
+        // 确保聊天记录也已初始化
+        if (chatHistories.find(name) == chatHistories.end()) {
+            chatHistories[name] = QStringList();
+        }
+    } else {
+        // 如果已存在，则获取第一个匹配项
+        itemToSelect = existingItems.first();
+    }
+
+    // 设置当前选中的联系人
+    if (itemToSelect) {
+        contactListWidget->setCurrentItem(itemToSelect);
+    }
 }
 
 void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *previous)
@@ -868,19 +886,24 @@ void MainWindow::applyStyles()
 void MainWindow::handleNetworkConnected()
 {
     updateNetworkStatus(tr("Connected."));
-    if (contactListWidget->currentItem() == nullptr && networkManager && networkManager->getPeerInfo().first.size() > 0) {
+    // 当网络连接成功（应用层面），尝试激活对应的联系人
+    if (networkManager && !networkManager->getPeerInfo().first.isEmpty()) {
         QString peerName = networkManager->getPeerInfo().first;
-        bool found = false;
-        for(int i=0; i<contactListWidget->count(); ++i) {
-            if(contactListWidget->item(i)->text() == peerName) {
-                contactListWidget->setCurrentRow(i);
-                found = true;
-                break;
-            }
-        }
-        if(!found) {
+
+        // 检查联系人是否已在列表中
+        QList<QListWidgetItem*> items = contactListWidget->findItems(peerName, Qt::MatchExactly);
+        if (items.isEmpty()) {
+            // 如果不在，则通过 handleContactAdded 添加（它会处理列表和历史记录，并选中）
             handleContactAdded(peerName);
+        } else {
+            // 如果已存在，则选中它
+            contactListWidget->setCurrentItem(items.first());
         }
+        // 确保聊天界面显示
+        if (chatStackedWidget->currentWidget() != activeChatContentsWidget) {
+             chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
+        }
+        messageInputEdit->setFocus();
     }
 }
 

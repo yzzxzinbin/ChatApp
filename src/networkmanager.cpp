@@ -2,10 +2,14 @@
 #include <QNetworkInterface>
 #include <QDataStream> // Required for QDataStream
 
+// 定义系统消息常量
+const QString SYS_MSG_SESSION_ACCEPTED = QStringLiteral("<SYS_SESSION_ACCEPTED/>");
+
 NetworkManager::NetworkManager(QObject *parent)
     : QObject(parent), tcpServer(nullptr), clientSocket(nullptr), pendingClientSocket(nullptr), defaultPort(60248),
       preferredListenPort(60248), // 初始化首选监听端口为默认值
-      preferredOutgoingPortNumber(0), bindToSpecificOutgoingPort(false)
+      preferredOutgoingPortNumber(0), bindToSpecificOutgoingPort(false),
+      isWaitingForPeerConfirmation(false), pendingConnectedPeerPort(0) // 初始化新成员
 {
     tcpServer = new QTcpServer(this);
     connect(tcpServer, &QTcpServer::newConnection, this, &NetworkManager::onNewConnection);
@@ -102,7 +106,7 @@ void NetworkManager::stopListening()
     }
 }
 
-void NetworkManager::connectToHost(const QString &ipAddress, quint16 port)
+void NetworkManager::connectToHost(const QString &peerNameToSet, const QString &ipAddress, quint16 port) // 修改签名
 {
     if (clientSocket && clientSocket->isOpen()) {
         clientSocket->disconnectFromHost();
@@ -134,10 +138,12 @@ void NetworkManager::connectToHost(const QString &ipAddress, quint16 port)
          emit serverStatusMessage(tr("Outgoing port set to 0 with 'specify' option, OS will choose a dynamic port."));
     }
 
-    connect(clientSocket, &QTcpSocket::connected, this, [this, ipAddress, port](){ // 捕获 port 以便在连接时使用
-        this->currentPeerName = ipAddress; // 或者从 AddContactDialog 传递过来的名称
-        this->connectedPeerPort = port; // 存储连接的远程端口
-        emit connected(); // 发送连接成功信号
+    connect(clientSocket, &QTcpSocket::connected, this, [this, peerNameToSet, port](){ // 捕获 peerNameToSet 和 port
+        // TCP连接已建立，但等待对方应用层确认
+        this->isWaitingForPeerConfirmation = true;
+        this->pendingPeerNameToSet = peerNameToSet;
+        this->pendingConnectedPeerPort = port; // 存储远程端口
+        emit tcpLinkEstablished(peerNameToSet); // 发出TCP链路建立信号
     });
     connect(clientSocket, &QTcpSocket::disconnected, this, &NetworkManager::onSocketDisconnected);
     connect(clientSocket, &QTcpSocket::readyRead, this, &NetworkManager::onSocketReadyRead);
@@ -215,13 +221,22 @@ void NetworkManager::acceptPendingConnection(const QString& peerName)
     pendingClientSocket = nullptr;
 
     this->currentPeerName = peerName.isEmpty() ? clientSocket->peerAddress().toString() : peerName;
+    this->connectedPeerPort = clientSocket->peerPort(); // 设置连接的对端端口
 
     connect(clientSocket, &QTcpSocket::disconnected, this, &NetworkManager::onSocketDisconnected);
     connect(clientSocket, &QTcpSocket::readyRead, this, &NetworkManager::onSocketReadyRead);
     connect(clientSocket, &QTcpSocket::errorOccurred, this, &NetworkManager::onSocketError);
     
-    emit connected();
-    emit serverStatusMessage(QString("Client connected: %1:%2 (Named: %3)").arg(clientSocket->peerAddress().toString()).arg(clientSocket->peerPort()).arg(currentPeerName));
+    // 发送会话接受确认消息给客户端
+    QByteArray block;
+    QDataStream out(&block, QIODevice::WriteOnly);
+    out.setVersion(QDataStream::Qt_6_5); // 与sendMessage保持一致
+    out << SYS_MSG_SESSION_ACCEPTED;
+    clientSocket->write(block);
+    clientSocket->flush();
+
+    emit connected(); // 服务器端连接完成
+    emit serverStatusMessage(QString("Client connected: %1:%2 (Named: %3). Sent session acceptance.").arg(clientSocket->peerAddress().toString()).arg(clientSocket->peerPort()).arg(currentPeerName));
 }
 
 void NetworkManager::rejectPendingConnection()
@@ -237,8 +252,11 @@ void NetworkManager::rejectPendingConnection()
 void NetworkManager::onSocketDisconnected()
 {
     emit disconnected();
-    emit serverStatusMessage(QString("Socket disconnected from %1.").arg(currentPeerName));
+    emit serverStatusMessage(QString("Socket disconnected from %1.").arg(currentPeerName.isEmpty() ? pendingPeerNameToSet : currentPeerName));
     currentPeerName.clear();
+    pendingPeerNameToSet.clear();
+    isWaitingForPeerConfirmation = false;
+    pendingConnectedPeerPort = 0;
     if (clientSocket) {
         clientSocket->deleteLater();
         clientSocket = nullptr;
@@ -261,7 +279,21 @@ void NetworkManager::onSocketReadyRead()
         in >> message;
 
         if (in.commitTransaction()) {
-            emit newMessageReceived(message);
+            if (isWaitingForPeerConfirmation && message == SYS_MSG_SESSION_ACCEPTED) {
+                isWaitingForPeerConfirmation = false;
+                currentPeerName = pendingPeerNameToSet;
+                connectedPeerPort = pendingConnectedPeerPort; // 确认连接时，最终设置对端端口
+
+                pendingPeerNameToSet.clear();
+
+                emit serverStatusMessage(tr("Session with %1 accepted by peer.").arg(currentPeerName));
+                emit connected(); // 客户端应用层连接完成
+            } else if (message == SYS_MSG_SESSION_ACCEPTED && !isWaitingForPeerConfirmation) {
+                emit serverStatusMessage(tr("Received unexpected session acceptance from %1.").arg(currentPeerName.isEmpty() ? clientSocket->peerAddress().toString() : currentPeerName));
+            }
+            else {
+                emit newMessageReceived(message);
+            }
         } else {
             break; 
         }
@@ -294,8 +326,10 @@ QAbstractSocket::SocketState NetworkManager::getCurrentSocketState() const
 }
 
 QPair<QString, quint16> NetworkManager::getPeerInfo() const {
-    if (clientSocket && clientSocket->state() == QAbstractSocket::ConnectedState) {
-        return qMakePair(currentPeerName.isEmpty() ? clientSocket->peerAddress().toString() : currentPeerName, clientSocket->peerPort());
+    if (clientSocket && clientSocket->state() == QAbstractSocket::ConnectedState && !isWaitingForPeerConfirmation) { // 只有在完全连接后才提供信息
+        return qMakePair(currentPeerName.isEmpty() ? clientSocket->peerAddress().toString() : currentPeerName, connectedPeerPort);
+    } else if (isWaitingForPeerConfirmation && !pendingPeerNameToSet.isEmpty()) {
+        return qMakePair(pendingPeerNameToSet, pendingConnectedPeerPort);
     }
     return qMakePair(QString(), 0);
 }

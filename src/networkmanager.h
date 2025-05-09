@@ -26,7 +26,7 @@ public:
     void stopListening();
 
     // 连接到指定IP和端口
-    void connectToHost(const QString &hostAddress, quint16 port);
+    void connectToHost(const QString &peerNameToSet, const QString &hostAddress, quint16 port); // 修改签名
     
     // 断开当前连接
     void disconnectFromHost();
@@ -58,6 +58,7 @@ signals:
     void serverStatusMessage(const QString &message);
     // 新增：传入连接请求信号
     void incomingConnectionRequest(const QString &peerAddress, quint16 peerPort);
+    void tcpLinkEstablished(const QString& tentativePeerName); // 新信号：TCP链路建立，等待对方确认
 
 public slots:
     // 新增：接受待处理的连接
@@ -86,12 +87,16 @@ private:
     QString currentPeerName;    // 新增：当前连接对方的名称
     QString lastError;          // 新增：最后发生的错误字符串
 
-    QString connectedPeerName; // Name of the connected peer
-    quint16 connectedPeerPort; // Port of the connected peer
+    quint16 connectedPeerPort;
 
     quint16 preferredListenPort;
     quint16 preferredOutgoingPortNumber; // 新增：首选传出端口号
     bool bindToSpecificOutgoingPort;  // 新增：是否绑定到特定的传出端口
+
+    // 新增状态和临时变量
+    bool isWaitingForPeerConfirmation;
+    QString pendingPeerNameToSet;
+    quint16 pendingConnectedPeerPort;
 
     void setupServer();
 };
