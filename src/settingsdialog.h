@@ -19,6 +19,7 @@ class SettingsDialog : public QDialog
 
 public:
     explicit SettingsDialog(const QString &currentUserName,
+                            const QString &currentUserUuid, // 新增UUID参数
                             quint16 currentListenPort,
                             quint16 currentOutgoingPort, bool useSpecificOutgoingPort,
                             QWidget *parent = nullptr);
@@ -27,6 +28,12 @@ public:
     quint16 getListenPort() const;
     quint16 getOutgoingPort() const;
     bool isSpecificOutgoingPortSelected() const;
+
+    // New public method to update dialog fields
+    void updateFields(const QString &userName,
+                      const QString &uuid,
+                      quint16 listenPort,
+                      quint16 outgoingPort, bool useSpecificOutgoing);
 
 signals:
     void settingsApplied(const QString &userName,
@@ -41,6 +48,7 @@ private:
     void setupUI();
 
     QLineEdit *userNameEdit;
+    QLineEdit *userUuidEdit; // 新增：显示UUID的LineEdit
 
     // 监听端口设置
     QSpinBox *listenPortSpinBox;
@@ -54,6 +62,7 @@ private:
 
     // Store initial values
     QString initialUserName;
+    QString initialUserUuid; // 新增
     quint16 initialListenPort;
     quint16 initialOutgoingPort;
     bool initialUseSpecificOutgoingPort;

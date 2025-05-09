@@ -26,6 +26,12 @@ set(PROJECT_SOURCES
         src/addcontactdialog.h
         src/settingsdialog.cpp
         src/settingsdialog.h
+        src/peerinfowidget.h
+        src/peerinfowidget.cpp
+        src/styleutils.h
+        src/styleutils.cpp
+        src/formattingtoolbarhandler.h
+        src/formattingtoolbarhandler.cpp
         src/resources.qrc
 )
 

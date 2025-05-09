@@ -45,33 +45,33 @@ void ContactManager::handleConnectRequested(const QString &name, const QString &
 
 void ContactManager::onConnectionSuccess()
 {
-    // NetworkManager::connected() 现在意味着会话已被对方完全接受
     QString establishedPeerName;
+    QString establishedPeerUuid;
+    QString establishedPeerIpAddress;
+    quint16 establishedPeerPort = 0;
+
     if (netManager) {
-        establishedPeerName = netManager->getPeerInfo().first;
+        QPair<QString, quint16> peerNetInfo = netManager->getPeerInfo();
+        establishedPeerName = peerNetInfo.first;
+        establishedPeerPort = peerNetInfo.second;
+        establishedPeerUuid = netManager->getCurrentPeerUuid();
+        establishedPeerIpAddress = netManager->getCurrentPeerIpAddress();
     }
 
     if (currentAddDialog && currentAddDialog->isVisible()) {
-        // 检查 NetworkManager 中最终确定的名称是否与我们尝试添加时用的名称一致
-        if (!pendingContactName.isEmpty() && pendingContactName == establishedPeerName) {
-             emit statusUpdate(tr("Session with %1 accepted!").arg(establishedPeerName), true, false);
-             emit contactAdded(establishedPeerName); // 确保使用最终确认的名称
-             currentAddDialog->accept(); // 关闭对话框
-        } else if (!establishedPeerName.isEmpty()) {
-            // 名称不匹配，这可能是一个逻辑问题或并发连接（不太可能在这个简单应用中）
-            emit statusUpdate(tr("Session established with %1, but expected %2. Adding %1.")
-                              .arg(establishedPeerName).arg(pendingContactName), true, false);
-            emit contactAdded(establishedPeerName); // 添加实际连接上的名称
-            currentAddDialog->accept();
+        if (!establishedPeerName.isEmpty() && !establishedPeerUuid.isEmpty()) {
+             emit statusUpdate(tr("Session with %1 (UUID: %2) accepted!").arg(establishedPeerName).arg(establishedPeerUuid), true, false);
+             emit contactAdded(establishedPeerName, establishedPeerUuid, establishedPeerIpAddress, establishedPeerPort);
+             currentAddDialog->accept();
         } else {
-            // 连接成功了，但无法获取对方名称，或者pendingContactName为空但dialog仍在
-            emit statusUpdate(tr("Session accepted, but name mismatch or missing. Please check contacts."), false, false);
+            emit statusUpdate(tr("Session accepted, but peer details (name/UUID/IP) missing."), false, false);
         }
-    } else if (!establishedPeerName.isEmpty()) {
-        // AddContactDialog 已关闭，但连接成功了 (例如，用户在等待时关闭了对话框)
-        // MainWindow::handleNetworkConnected 会处理将此联系人添加到列表
+    } else if (!establishedPeerName.isEmpty() && !establishedPeerUuid.isEmpty()) {
+        // Dialog was closed, but connection succeeded. MainWindow::handleNetworkConnected will use NetworkManager's info.
+        // contactAdded should still be emitted so MainWindow can store the UUID if it's a new contact.
+         emit contactAdded(establishedPeerName, establishedPeerUuid, establishedPeerIpAddress, establishedPeerPort);
     }
-    pendingContactName.clear();
+    pendingContactName.clear(); // This was for the dialog's initial name, UUID is the key now.
 }
 
 void ContactManager::onConnectionFailed()

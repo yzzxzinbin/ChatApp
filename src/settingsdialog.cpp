@@ -12,19 +12,22 @@
 #include <QCheckBox>
 
 SettingsDialog::SettingsDialog(const QString &currentUserName,
+                               const QString &currentUserUuid,
                                quint16 currentListenPort,
                                quint16 currentOutgoingPort, bool useSpecificOutgoingPort,
                                QWidget *parent)
     : QDialog(parent),
       initialUserName(currentUserName),
+      initialUserUuid(currentUserUuid),
       initialListenPort(currentListenPort),
       initialOutgoingPort(currentOutgoingPort), initialUseSpecificOutgoingPort(useSpecificOutgoingPort)
 {
     setupUI();
     setWindowTitle(tr("Application Settings"));
-    setMinimumWidth(380);
+    setMinimumWidth(400);
 
     userNameEdit->setText(currentUserName);
+    userUuidEdit->setText(currentUserUuid);
 
     // 初始化监听端口设置
     if (currentListenPort > 0) {
@@ -43,18 +46,44 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
     onOutgoingPortSettingsChanged();
 }
 
+void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, quint16 outgoingPort, bool useSpecificOutgoing)
+{
+    userNameEdit->setText(userName);
+    userUuidEdit->setText(uuid); // UUID is read-only, but good to refresh if it could ever change (though unlikely)
+
+    if (listenPort > 0) {
+        listenPortSpinBox->setValue(listenPort);
+    } else {
+        listenPortSpinBox->setValue(60248); // Default fallback
+    }
+
+    specifyOutgoingPortCheckBox->setChecked(useSpecificOutgoing);
+    if (useSpecificOutgoing && outgoingPort > 0) {
+        outgoingPortSpinBox->setValue(outgoingPort);
+    } else {
+        outgoingPortSpinBox->setValue(0); // Default for dynamic or if not specified
+    }
+    onOutgoingPortSettingsChanged(); // Ensure dependent UI state is correct
+}
+
 void SettingsDialog::setupUI()
 {
     QVBoxLayout *mainLayout = new QVBoxLayout(this);
 
-    // User Name Section
-    QGroupBox *userNameGroup = new QGroupBox(tr("User Profile"), this);
-    QFormLayout *userNameLayout = new QFormLayout();
+    // User Profile Section
+    QGroupBox *userProfileGroup = new QGroupBox(tr("User Profile"), this);
+    QFormLayout *userProfileLayout = new QFormLayout();
     userNameEdit = new QLineEdit(this);
     userNameEdit->setPlaceholderText(tr("Enter your display name"));
-    userNameLayout->addRow(tr("Display Name:"), userNameEdit);
-    userNameGroup->setLayout(userNameLayout);
-    mainLayout->addWidget(userNameGroup);
+    userProfileLayout->addRow(tr("Display Name:"), userNameEdit);
+
+    userUuidEdit = new QLineEdit(this);
+    userUuidEdit->setReadOnly(true);
+    userUuidEdit->setToolTip(tr("Your unique identifier. This cannot be changed."));
+    userProfileLayout->addRow(tr("User UUID:"), userUuidEdit);
+
+    userProfileGroup->setLayout(userProfileLayout);
+    mainLayout->addWidget(userProfileGroup);
 
     // Network Listening Port Section
     QGroupBox *listenPortGroup = new QGroupBox(tr("Network Listening Port (for incoming connections)"), this);

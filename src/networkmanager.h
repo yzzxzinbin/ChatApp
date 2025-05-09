@@ -40,6 +40,10 @@ public:
     QString getLastError() const;
     // 获取当前连接对方的信息 (名称/IP, 端口)
     QPair<QString, quint16> getPeerInfo() const;
+    QString getCurrentPeerUuid() const; // Ensure this is public
+    QString getCurrentPeerIpAddress() const; // New getter for IP Address
+
+    void setLocalUserDetails(const QString& uuid, const QString& displayName); // 新增
 
 signals:
     // 连接成功信号
@@ -56,8 +60,8 @@ signals:
     
     // 服务器状态信息
     void serverStatusMessage(const QString &message);
-    // 新增：传入连接请求信号
-    void incomingConnectionRequest(const QString &peerAddress, quint16 peerPort);
+    // Modified:传入连接请求信号, now includes peer's UUID and name hint
+    void incomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
     void tcpLinkEstablished(const QString& tentativePeerName); // 新信号：TCP链路建立，等待对方确认
 
 public slots:
@@ -79,12 +83,17 @@ private slots:
     // 处理socket错误
     void onSocketError(QAbstractSocket::SocketError socketError);
 
+    void onPendingSocketReadyRead(); // New slot to handle initial message from pending connection
+    void onPendingSocketDisconnected(); // New slot
+    void onPendingSocketError(QAbstractSocket::SocketError socketError); // New slot
+
 private:
     QTcpServer *tcpServer;      // TCP服务器对象
     QTcpSocket *clientSocket;   // 客户端socket对象
     QTcpSocket *pendingClientSocket; // 新增：待处理的客户端socket对象
     quint16 defaultPort;        // 默认端口
     QString currentPeerName;    // 新增：当前连接对方的名称
+    QString currentPeerUuid;    // 新增：当前连接对方的UUID
     QString lastError;          // 新增：最后发生的错误字符串
 
     quint16 connectedPeerPort;
@@ -96,7 +105,16 @@ private:
     // 新增状态和临时变量
     bool isWaitingForPeerConfirmation;
     QString pendingPeerNameToSet;
+    QString pendingPeerUuidToSet; // Renamed from pendingPeerUuidToSet for clarity on its use (client side)
     quint16 pendingConnectedPeerPort;
+
+    // Temporary storage for incoming connection's initial info
+    QString tempPeerUuidFromHello;
+    QString tempPeerNameHintFromHello;
+
+    // 本地用户信息
+    QString localUserUuid;
+    QString localUserDisplayName;
 
     void setupServer();
 };

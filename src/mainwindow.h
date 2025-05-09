@@ -6,9 +6,10 @@
 #include <QLabel>
 #include <QMap> // For chat history
 #include <QStringList> // For chat history
+#include <QUuid> // For UUID generation
+#include <QSettings> // For storing UUID
 #include "chatmessagedisplay.h" // 添加自定义组件头文件
 #include "networkmanager.h" // Include NetworkManager
-// #include "settingsdialog.h" // Forward declare instead or include if SettingsDialog is used as value
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
@@ -25,6 +26,8 @@ class QColor; // For color selection
 
 class ContactManager;
 class SettingsDialog; // Forward declaration
+class PeerInfoWidget; // Forward declaration for our new widget
+class FormattingToolbarHandler; // Forward declaration for the new handler
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
@@ -35,6 +38,7 @@ public:
     MainWindow(QWidget *parent = nullptr);
     ~MainWindow();
     QString getLocalUserName() const;
+    QString getLocalUserUuid() const; // 新增
 
 private:
     // Declare widgets and layouts
@@ -93,17 +97,21 @@ private:
 
     // 用户设置
     QString localUserName;
+    QString localUserUuid; // 新增：本地用户的UUID
     quint16 localListenPort;
     quint16 localOutgoingPort;         // 新增：传出连接的源端口
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
+    PeerInfoWidget *peerInfoDisplayWidget; // New widget instance
+    FormattingToolbarHandler *formattingHandler; // New handler instance
+
     void setupUI();
-    void applyStyles();
+    void loadOrCreateUserIdentity(); // 新增方法
 
 private slots:
     void onClearButtonClicked();
     void onAddContactButtonClicked();
-    void handleContactAdded(const QString &name);
+    void handleContactAdded(const QString &name, const QString &uuid); // Modified to include UUID
     void onContactSelected(QListWidgetItem *current, QListWidgetItem *previous);
     void onSendButtonClicked();
     void onSettingsButtonClicked(); // 设置按钮的槽函数
@@ -117,16 +125,21 @@ private slots:
     void handleNewMessageReceived(const QString &message);
     void handleNetworkError(QAbstractSocket::SocketError socketError);
     void updateNetworkStatus(const QString &status);
-    void handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort);
+    // Modified to include UUID and name hint
+    void handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
 
-    // Formatting slots
-    void onBoldButtonToggled(bool checked);
-    void onItalicButtonToggled(bool checked);
-    void onUnderlineButtonToggled(bool checked);
-    void onColorButtonClicked(); // 添加颜色按钮点击处理
-    void onBgColorButtonClicked(); // 新增背景色按钮点击事件
-    void onFontSizeChanged(const QString &text);
-    void onFontFamilyChanged(const QFont &font);
-    void onCurrentCharFormatChanged(const QTextCharFormat &format);
+    // Formatting related slots are now removed, will be handled by FormattingToolbarHandler
+    // void onBoldButtonToggled(bool checked);
+    // void onItalicButtonToggled(bool checked);
+    // void onUnderlineButtonToggled(bool checked);
+    // void onColorButtonClicked();
+    // void onBgColorButtonClicked();
+    // void onFontSizeChanged(const QString &text);
+    // void onFontFamilyChanged(const QFont &font);
+    // void onCurrentCharFormatChanged(const QTextCharFormat &format);
+
+    // New slots to update MainWindow's color state from FormattingToolbarHandler
+    void handleTextColorChanged(const QColor &color);
+    void handleBackgroundColorChanged(const QColor &color);
 };
 #endif // MAINWINDOW_H

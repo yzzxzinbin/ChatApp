@@ -18,7 +18,7 @@ public:
     void showAddContactDialog(QWidget *parentWidget);
 
 signals:
-    void contactAdded(const QString &name); // Emitted when a contact is successfully established and should be added to list
+    void contactAdded(const QString &name, const QString &uuid, const QString &ipAddress, quint16 port); // New: name, uuid, last ip, last port
     void statusUpdate(const QString &message, bool success, bool connecting); // To update AddContactDialog
 
 private slots:
