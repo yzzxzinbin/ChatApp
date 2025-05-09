@@ -3,5 +3,6 @@
     <file alias="dropdown_arrow.svg">../res/button_down.svg</file>
     <file alias="add_user.svg">../res/add_user.svg</file>
     <file alias="close.svg">../res/close.svg</file>
+    <file alias="settings.svg">../res/settings.svg</file>
 </qresource>
 </RCC>

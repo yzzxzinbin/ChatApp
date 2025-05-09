@@ -24,6 +24,8 @@ set(PROJECT_SOURCES
         src/networkmanager.cpp     # 添加 networkmanager.cpp
         src/addcontactdialog.cpp
         src/addcontactdialog.h
+        src/settingsdialog.cpp
+        src/settingsdialog.h
         src/resources.qrc
 )
 

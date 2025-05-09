@@ -15,13 +15,18 @@ public:
     ~NetworkManager();
 
     // 启动服务器监听
-    bool startListening(quint16 port = 60248);
+    bool startListening();
+    
+    // 设置监听首选项
+    void setListenPreferences(quint16 port); // 移除 bool useDynamic
+    // 新增：设置传出连接首选项
+    void setOutgoingConnectionPreferences(quint16 port, bool useSpecific);
     
     // 停止服务器监听
     void stopListening();
 
     // 连接到指定IP和端口
-    void connectToHost(const QString &ipAddress, quint16 port = 60248);
+    void connectToHost(const QString &hostAddress, quint16 port);
     
     // 断开当前连接
     void disconnectFromHost();
@@ -80,6 +85,15 @@ private:
     quint16 defaultPort;        // 默认端口
     QString currentPeerName;    // 新增：当前连接对方的名称
     QString lastError;          // 新增：最后发生的错误字符串
+
+    QString connectedPeerName; // Name of the connected peer
+    quint16 connectedPeerPort; // Port of the connected peer
+
+    quint16 preferredListenPort;
+    quint16 preferredOutgoingPortNumber; // 新增：首选传出端口号
+    bool bindToSpecificOutgoingPort;  // 新增：是否绑定到特定的传出端口
+
+    void setupServer();
 };
 
 #endif // NETWORKMANAGER_H

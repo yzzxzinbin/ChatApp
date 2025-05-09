@@ -2,6 +2,7 @@
 #include "contactmanager.h"
 #include "chatmessagedisplay.h"
 #include "networkmanager.h" // 确保包含了 NetworkManager
+#include "settingsdialog.h" // 确保包含了 SettingsDialog
 
 #include <QApplication>
 #include <QListWidget>
@@ -24,12 +25,21 @@
 #include <QInputDialog> // For naming incoming connections
 
 MainWindow::MainWindow(QWidget *parent)
-    : QMainWindow(parent)
+    : QMainWindow(parent),
+      settingsDialog(nullptr), // 初始化 settingsDialog 为 nullptr
+      localUserName(tr("Me")),      // 默认用户名
+      localListenPort(60248),       // 默认监听端口 60248
+      localOutgoingPort(0),         // 默认传出端口为0 (动态)
+      useSpecificOutgoingPort(false) // 默认不指定传出端口
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
 
     // 1. 首先初始化 NetworkManager
     networkManager = new NetworkManager(this);
+    // 在 NetworkManager 启动监听前设置初始首选项
+    networkManager->setListenPreferences(localListenPort);
+    // 设置初始传出连接首选项
+    networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
 
     // 2. 然后初始化 ContactManager，并将 NetworkManager 实例传递给它
     contactManager = new ContactManager(networkManager, this);
@@ -58,6 +68,13 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // settingsDialog 如果被设置了父对象，会被 Qt 自动管理内存
+    // 如果没有，或者需要显式清理，可以在这里 delete settingsDialog;
+}
+
+QString MainWindow::getLocalUserName() const
+{
+    return localUserName;
 }
 
 void MainWindow::setupUI()
@@ -85,7 +102,18 @@ void MainWindow::setupUI()
     addContactButton->setToolTip("Add new contact");
     connect(addContactButton, &QPushButton::clicked, this, &MainWindow::onAddContactButtonClicked);
     leftSidebarLayout->addWidget(addContactButton);
-    leftSidebarLayout->addStretch();    // 添加垂直填充
+
+    leftSidebarLayout->addStretch();    // 添加垂直填充，将后续控件推到底部
+
+    // 添加设置按钮
+    settingsButton = new QPushButton(this);
+    settingsButton->setObjectName("settingsButton");
+    settingsButton->setIcon(QIcon(":/icons/settings.svg")); // 假设您的SVG图标路径
+    settingsButton->setIconSize(QSize(24, 24));
+    settingsButton->setToolTip(tr("Settings"));
+    connect(settingsButton, &QPushButton::clicked, this, &MainWindow::onSettingsButtonClicked);
+    leftSidebarLayout->addWidget(settingsButton); // 添加到布局的底部
+
     mainLayout->addWidget(leftSidebar); // 将左侧侧边栏添加到主布局
 
     // 联系人列表
@@ -283,6 +311,63 @@ void MainWindow::onAddContactButtonClicked()
     contactManager->showAddContactDialog(this);
 }
 
+void MainWindow::onSettingsButtonClicked()
+{
+    // 使用现有的对话框实例，或者如果不存在则创建
+    if (!settingsDialog) {
+        settingsDialog = new SettingsDialog(localUserName,
+                                            localListenPort,
+                                            localOutgoingPort, useSpecificOutgoingPort,
+                                            this);
+        connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
+    }
+    settingsDialog->exec(); // 以模态方式显示对话框
+}
+
+void MainWindow::handleSettingsApplied(const QString &userName,
+                                       quint16 listenPort,
+                                       quint16 outgoingPort, bool useSpecificOutgoingPortVal)
+{
+    bool settingsChanged = false;
+    bool networkRestartNeeded = false;
+
+    if (localUserName != userName) {
+        localUserName = userName;
+        settingsChanged = true;
+    }
+
+    if (localListenPort != listenPort) {
+        localListenPort = listenPort;
+        settingsChanged = true;
+        networkRestartNeeded = true; // 监听端口更改需要重启监听
+    }
+
+    if (localOutgoingPort != outgoingPort || useSpecificOutgoingPort != useSpecificOutgoingPortVal) {
+        localOutgoingPort = outgoingPort;
+        useSpecificOutgoingPort = useSpecificOutgoingPortVal;
+        networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
+        settingsChanged = true;
+        // 传出端口设置更改不需要重启监听，它会在下次连接时生效
+        updateNetworkStatus(tr("Outgoing port preference updated. Will apply to new connections."));
+    }
+
+    if (networkRestartNeeded) {
+        updateNetworkStatus(tr("Listen port settings changed. Restarting listener..."));
+        networkManager->setListenPreferences(localListenPort);
+        networkManager->stopListening(); // 显式停止
+        networkManager->startListening(); // 使用新设置重新启动
+    }
+
+    if (settingsChanged) {
+         updateNetworkStatus(tr("Settings applied. User: %1, Listen Port: %2, Outgoing Port: %3")
+                            .arg(localUserName)
+                            .arg(QString::number(localListenPort))
+                            .arg(useSpecificOutgoingPort && localOutgoingPort > 0 ? QString::number(localOutgoingPort) : tr("Dynamic")));
+    } else if (!networkRestartNeeded) { // 避免在仅重启网络时显示 "unchanged"
+        updateNetworkStatus(tr("Settings unchanged."));
+    }
+}
+
 void MainWindow::handleContactAdded(const QString &name)
 {
     if (chatHistories.find(name) == chatHistories.end())
@@ -369,12 +454,14 @@ void MainWindow::onSendButtonClicked()
             coreContent = fragment.toHtml();
         }
 
+        // 使用配置的 localUserName
         QString userMessageHtml = QString(
                                       "<div style=\"text-align: right; margin-bottom: 2px;\">"
                                       "<p style=\"margin:0; padding:0; text-align: right;\">"
-                                      "<span style=\"font-weight: bold; background-color: #a7dcb2; padding: 2px 6px; margin-left: 4px; border-radius: 3px;\">Me:</span> %1"
+                                      "<span style=\"font-weight: bold; background-color: #a7dcb2; padding: 2px 6px; margin-left: 4px; border-radius: 3px;\">%1:</span> %2"
                                       "</p>"
                                       "</div>")
+                                      .arg(localUserName.toHtmlEscaped()) // 使用存储的本地用户名并进行HTML转义
                                       .arg(coreContent);
 
         chatHistories[currentOpenChatContactName].append(userMessageHtml);
@@ -581,6 +668,8 @@ void MainWindow::applyStyles()
         #leftSidebar QPushButton:pressed {
             background-color: #1a252f;
         }
+
+        /* 新的设置按钮将自动继承 #leftSidebar QPushButton 的样式 */
 
         #contactListWidget {
             background-color: #ffffff;
