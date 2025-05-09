@@ -42,8 +42,6 @@ MainWindow::MainWindow(QWidget *parent)
       useSpecificOutgoingPort(false) // 默认不指定传出端口
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
-    QCoreApplication::setOrganizationName("YourCompany"); // 推荐设置
-    QCoreApplication::setApplicationName("ChatApp");      // 推荐设置
 
     loadOrCreateUserIdentity(); // 加载或创建用户UUID和名称
 
