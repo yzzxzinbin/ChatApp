@@ -82,15 +82,17 @@ MainWindow::MainWindow(QWidget *parent)
     resize(1024, 768);
 
     // Connect NetworkManager signals to NetworkEventHandler slots
-    connect(networkManager, &NetworkManager::connected, networkEventHandler, &NetworkEventHandler::handleNetworkConnected);
-    connect(networkManager, &NetworkManager::disconnected, networkEventHandler, &NetworkEventHandler::handleNetworkDisconnected);
+    // 更新连接以匹配新的信号和槽签名
+    connect(networkManager, &NetworkManager::peerConnected, networkEventHandler, &NetworkEventHandler::handlePeerConnected);
+    connect(networkManager, &NetworkManager::peerDisconnected, networkEventHandler, &NetworkEventHandler::handlePeerDisconnected);
     connect(networkManager, &NetworkManager::newMessageReceived, networkEventHandler, &NetworkEventHandler::handleNewMessageReceived);
-    connect(networkManager, &NetworkManager::networkError, networkEventHandler, &NetworkEventHandler::handleNetworkError);
+    connect(networkManager, &NetworkManager::peerNetworkError, networkEventHandler, &NetworkEventHandler::handlePeerNetworkError);
 
     // serverStatusMessage still connects to MainWindow's updateNetworkStatus
     connect(networkManager, &NetworkManager::serverStatusMessage, this, &MainWindow::updateNetworkStatus);
-    // incomingConnectionRequest still connects to MainWindow's slot
-    connect(networkManager, &NetworkManager::incomingConnectionRequest, this, &MainWindow::handleIncomingConnectionRequest);
+    // incomingConnectionRequest (renamed to incomingSessionRequest in NetworkManager) still connects to MainWindow's slot
+    // 注意：NetworkManager 中的信号已重命名为 incomingSessionRequest
+    connect(networkManager, &NetworkManager::incomingSessionRequest, this, &MainWindow::handleIncomingConnectionRequest);
 
     // 应用启动后默认开启端口监听
     networkManager->startListening();
@@ -274,54 +276,49 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
     Q_UNUSED(previous);
     if (current)
     {
-        currentOpenChatContactName = current->text();
+        currentOpenChatContactName = current->text(); // 这仍然可以用于UI显示，但UUID是关键
         QString peerUuid = current->data(Qt::UserRole).toString();
-        if (peerUuid.isEmpty())
-            peerUuid = tr("N/A (No UUID)");
+        
+        if (peerUuid.isEmpty()) {
+            qWarning() << "Selected contact" << currentOpenChatContactName << "has no UUID.";
+            if (peerInfoDisplayWidget) peerInfoDisplayWidget->clearDisplay();
+            messageDisplay->clear();
+            messageInputEdit->clear();
+            messageInputEdit->setEnabled(false);
+            if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel) {
+                chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel);
+            }
+            return;
+        }
 
-        QPair<QString, quint16> peerNetInfo;
-        // Check if the selected contact is the currently active network connection
-        if (networkManager && networkManager->getCurrentSocketState() == QAbstractSocket::ConnectedState &&
-            networkManager->getPeerInfo().first == currentOpenChatContactName &&
-            networkManager->getCurrentPeerUuid() == peerUuid)
-        { // This call should now work
-            peerNetInfo = networkManager->getPeerInfo();
-            QString peerIpAddress = networkManager->getCurrentPeerIpAddress(); // Get IP specifically
-            if (peerInfoDisplayWidget)
-                peerInfoDisplayWidget->updateDisplay(peerNetInfo.first, peerUuid, peerIpAddress, peerNetInfo.second);
+        // 更新 PeerInfoWidget
+        if (networkManager && peerInfoDisplayWidget) {
+            QAbstractSocket::SocketState state = networkManager->getPeerSocketState(peerUuid);
+            if (state == QAbstractSocket::ConnectedState) {
+                QPair<QString, quint16> netInfo = networkManager->getPeerInfo(peerUuid); // 使用UUID获取信息
+                QString ipAddr = networkManager->getPeerIpAddress(peerUuid);
+                peerInfoDisplayWidget->updateDisplay(netInfo.first, peerUuid, ipAddr, netInfo.second);
+                 messageInputEdit->setEnabled(true);
+            } else {
+                // 对等方可能在联系人列表中，但当前未连接
+                peerInfoDisplayWidget->updateDisplay(currentOpenChatContactName, peerUuid, tr("Not Connected"), 0);
+                 messageInputEdit->setEnabled(false); // 如果未连接，则禁用输入
+            }
         }
-        else
-        {
-            if (peerInfoDisplayWidget)
-                peerInfoDisplayWidget->updateDisplay(currentOpenChatContactName, peerUuid, tr("N/A"), 0);
-        }
+
 
         QStringList messagesToDisplay;
-        // Use UUID for chat history (as per previous correct change)
-        QString currentContactUuid = current->data(Qt::UserRole).toString();
-        if (!currentContactUuid.isEmpty() && chatHistories.contains(currentContactUuid))
+        if (chatHistories.contains(peerUuid))
         {
-            messagesToDisplay = chatHistories.value(currentContactUuid);
-        }
-        else if (!currentContactUuid.isEmpty())
-        {
-            chatHistories[currentContactUuid] = QStringList(); // Initialize if new
+            messagesToDisplay = chatHistories.value(peerUuid);
         }
         else
         {
-            qWarning() << "Selected contact" << currentOpenChatContactName << "has no UUID for chat history.";
-            // Fallback to name-based if UUID is somehow empty, though this shouldn't happen with proper UUID management
-            if (chatHistories.contains(currentOpenChatContactName))
-            {
-                messagesToDisplay = chatHistories.value(currentOpenChatContactName);
-            }
-            else
-            {
-                chatHistories[currentOpenChatContactName] = QStringList();
-            }
+            chatHistories[peerUuid] = QStringList(); // 为新的UUID初始化历史记录
         }
 
         messageDisplay->setMessages(messagesToDisplay);
+        current->setBackground(QBrush()); // 清除未读消息的背景
 
         messageInputEdit->clear();
         messageInputEdit->setFocus();
@@ -329,32 +326,47 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
         {
             chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
         }
+        // 根据连接状态启用/禁用输入框
+        if (networkManager && networkManager->getPeerSocketState(peerUuid) == QAbstractSocket::ConnectedState) {
+            messageInputEdit->setEnabled(true);
+        } else {
+            messageInputEdit->setEnabled(false);
+        }
+
     }
     else
     {
         currentOpenChatContactName.clear();
+        if (peerInfoDisplayWidget) peerInfoDisplayWidget->clearDisplay();
         messageDisplay->clear();
         messageInputEdit->clear();
+        messageInputEdit->setEnabled(false);
         if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel)
         {
             chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel);
-            if (peerInfoDisplayWidget)
-                peerInfoDisplayWidget->clearDisplay();
         }
     }
 }
 
 void MainWindow::onSendButtonClicked()
 {
-    if (currentOpenChatContactName.isEmpty())
-    {
-        updateNetworkStatus(tr("No active chat to send message."));
+    QListWidgetItem *currentItem = contactListWidget->currentItem();
+    if (!currentItem) {
+        updateNetworkStatus(tr("No active chat selected."));
         return;
     }
-    if (!networkManager || networkManager->getCurrentSocketState() != QAbstractSocket::ConnectedState)
+
+    QString targetPeerUuid = currentItem->data(Qt::UserRole).toString();
+    if (targetPeerUuid.isEmpty()) {
+        updateNetworkStatus(tr("Selected contact has no UUID. Cannot send message."));
+        QMessageBox::warning(this, tr("Error"), tr("Selected contact has no UUID."));
+        return;
+    }
+
+    if (!networkManager || networkManager->getPeerSocketState(targetPeerUuid) != QAbstractSocket::ConnectedState)
     {
-        updateNetworkStatus(tr("Not connected. Cannot send message."));
-        QMessageBox::warning(this, tr("Network Error"), tr("Not connected to any peer. Please connect first."));
+        updateNetworkStatus(tr("Not connected to %1. Cannot send message.").arg(currentItem->text()));
+        QMessageBox::warning(this, tr("Network Error"), tr("Not connected to %1. Please ensure they are online and connected.").arg(currentItem->text()));
         return;
     }
 
@@ -392,12 +404,7 @@ void MainWindow::onSendButtonClicked()
                                       .arg(localUserName.toHtmlEscaped())
                                       .arg(coreContent);
 
-        QString activeContactUuid = "";
-        QListWidgetItem *currentItem = contactListWidget->currentItem();
-        if (currentItem)
-        {
-            activeContactUuid = currentItem->data(Qt::UserRole).toString();
-        }
+        QString activeContactUuid = targetPeerUuid; // 使用从currentItem获取的UUID
 
         if (!activeContactUuid.isEmpty())
         {
@@ -411,7 +418,7 @@ void MainWindow::onSendButtonClicked()
 
         messageDisplay->addMessage(userMessageHtml);
 
-        networkManager->sendMessage(coreContent);
+        networkManager->sendMessage(activeContactUuid, coreContent); // 使用 targetPeerUuid 发送
 
         messageInputEdit->clear();
         QTextCharFormat defaultFormat;
@@ -458,11 +465,12 @@ void MainWindow::updateNetworkStatus(const QString &status)
     }
 }
 
-void MainWindow::handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
+void MainWindow::handleIncomingConnectionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
 {
     QMessageBox::StandardButton reply;
     QString suggestedName = peerNameHint.isEmpty() ? peerAddress : peerNameHint;
 
+    // 查找现有联系人
     for (int i = 0; i < contactListWidget->count(); ++i)
     {
         QListWidgetItem *item = contactListWidget->item(i);
@@ -477,11 +485,11 @@ void MainWindow::handleIncomingConnectionRequest(const QString &peerAddress, qui
                                                                            QMessageBox::Yes | QMessageBox::No);
             if (reconReply == QMessageBox::Yes)
             {
-                networkManager->acceptPendingConnection(item->text());
+                networkManager->acceptIncomingSession(tempSocket, peerUuid, item->text());
             }
             else
             {
-                networkManager->rejectPendingConnection();
+                networkManager->rejectIncomingSession(tempSocket);
             }
             return;
         }
@@ -489,7 +497,7 @@ void MainWindow::handleIncomingConnectionRequest(const QString &peerAddress, qui
 
     reply = QMessageBox::question(this, tr("Incoming Connection"),
                                   tr("Accept connection from %1 (UUID: %2, Name Hint: '%3') at %4:%5?")
-                                      .arg(peerAddress)
+                                      .arg(peerAddress) // 这里应该是 peerAddress，而不是 peerNameHint
                                       .arg(peerUuid)
                                       .arg(peerNameHint.isEmpty() ? tr("N/A") : peerNameHint)
                                       .arg(peerAddress)
@@ -503,20 +511,20 @@ void MainWindow::handleIncomingConnectionRequest(const QString &peerAddress, qui
                                                     suggestedName, &ok);
         if (ok && !contactName.isEmpty())
         {
-            networkManager->acceptPendingConnection(contactName);
+            networkManager->acceptIncomingSession(tempSocket, peerUuid, contactName);
         }
         else if (ok && contactName.isEmpty())
         {
-            networkManager->acceptPendingConnection(suggestedName.isEmpty() ? peerAddress : suggestedName);
+            networkManager->acceptIncomingSession(tempSocket, peerUuid, suggestedName.isEmpty() ? peerAddress : suggestedName);
         }
         else
         {
-            networkManager->rejectPendingConnection();
+            networkManager->rejectIncomingSession(tempSocket);
             updateNetworkStatus(tr("Incoming connection naming cancelled. Rejected."));
         }
     }
     else
     {
-        networkManager->rejectPendingConnection();
+        networkManager->rejectIncomingSession(tempSocket);
     }
 }

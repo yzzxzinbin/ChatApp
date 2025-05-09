@@ -5,6 +5,8 @@
 #include <QTcpServer>
 #include <QTcpSocket>
 #include <QHostAddress>
+#include <QMap>
+#include <QStringList> // For getConnectedPeerUuids
 
 class NetworkManager : public QObject
 {
@@ -18,105 +20,124 @@ public:
     bool startListening();
     
     // 设置监听首选项
-    void setListenPreferences(quint16 port); // 移除 bool useDynamic
-    // 新增：设置传出连接首选项
+    void setListenPreferences(quint16 port);
+    // 设置传出连接首选项
     void setOutgoingConnectionPreferences(quint16 port, bool useSpecific);
     
     // 停止服务器监听
     void stopListening();
 
     // 连接到指定IP和端口
-    void connectToHost(const QString &peerNameToSet, const QString &hostAddress, quint16 port); // 修改签名
+    // peerNameToSet is the local name chosen for this peer, targetPeerUuidHint can be used if known for re-establishing
+    void connectToHost(const QString &peerNameToSet, const QString &targetPeerUuidHint, const QString &hostAddress, quint16 port);
     
-    // 断开当前连接
-    void disconnectFromHost();
+    // 断开与特定对等方的连接
+    void disconnectFromPeer(const QString &peerUuid);
 
-    // 发送消息
-    void sendMessage(const QString &message);
+    // 发送消息给特定对等方
+    void sendMessage(const QString &targetPeerUuid, const QString &message);
 
-    // 获取当前socket状态
-    QAbstractSocket::SocketState getCurrentSocketState() const;
-    // 获取最后发生的错误信息
+    // 获取特定对等方的socket状态
+    QAbstractSocket::SocketState getPeerSocketState(const QString& peerUuid) const;
+    // 获取特定对等方的信息 (名称/IP, 端口)
+    QPair<QString, quint16> getPeerInfo(const QString& peerUuid) const;
+    // 获取特定对等方的IP地址
+    QString getPeerIpAddress(const QString& peerUuid) const;
+    // 获取所有已连接对等方的UUID列表
+    QStringList getConnectedPeerUuids() const;
+    // 获取最后发生的通用服务器错误信息
     QString getLastError() const;
-    // 获取当前连接对方的信息 (名称/IP, 端口)
-    QPair<QString, quint16> getPeerInfo() const;
-    QString getCurrentPeerUuid() const; // Ensure this is public
-    QString getCurrentPeerIpAddress() const; // New getter for IP Address
 
-    void setLocalUserDetails(const QString& uuid, const QString& displayName); // 新增
+    void setLocalUserDetails(const QString& uuid, const QString& displayName);
 
 signals:
-    // 连接成功信号
-    void connected();
+    // 对等方连接成功信号 (包含UUID, 名称, 地址, 端口)
+    void peerConnected(const QString &peerUuid, const QString &peerName, const QString& peerAddress, quint16 peerPort);
     
-    // 断开连接信号
-    void disconnected();
+    // 对等方断开连接信号
+    void peerDisconnected(const QString &peerUuid);
     
-    // 收到新消息信号
-    void newMessageReceived(const QString &message);
+    // 收到来自特定对等方的新消息信号
+    void newMessageReceived(const QString &peerUuid, const QString &message);
     
-    // 网络错误信号
-    void networkError(QAbstractSocket::SocketError socketError);
+    // 特定对等方的网络错误信号
+    void peerNetworkError(const QString &peerUuid, QAbstractSocket::SocketError socketError, const QString& errorString);
     
     // 服务器状态信息
     void serverStatusMessage(const QString &message);
-    // Modified:传入连接请求信号, now includes peer's UUID and name hint
-    void incomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
-    void tcpLinkEstablished(const QString& tentativePeerName); // 新信号：TCP链路建立，等待对方确认
+
+    // 传入会话请求信号 (UI决定是否接受)
+    void incomingSessionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
+
+    // 新增：当出站连接尝试失败或被拒绝时发出
+    void outgoingConnectionFailed(const QString& peerNameAttempted, const QString& reason);
 
 public slots:
-    // 新增：接受待处理的连接
-    void acceptPendingConnection(const QString& peerName = QString());
-    // 新增：拒绝待处理的连接
-    void rejectPendingConnection();
+    // 接受传入的会话
+    void acceptIncomingSession(QTcpSocket* tempSocket, const QString& peerUuid, const QString& localNameForPeer);
+    // 拒绝传入的会话
+    void rejectIncomingSession(QTcpSocket* tempSocket);
 
 private slots:
-    // 处理新连接
+    // 处理服务器的新连接请求
     void onNewConnection();
     
-    // 处理断开连接
-    void onSocketDisconnected();
-    
-    // 读取数据
-    void onSocketReadyRead();
-    
-    // 处理socket错误
-    void onSocketError(QAbstractSocket::SocketError socketError);
+    // 处理已建立连接的客户端socket断开
+    void handleClientSocketDisconnected();
+    // 处理已建立连接的客户端socket可读数据
+    void handleClientSocketReadyRead();
+    // 处理已建立连接的客户端socket错误
+    void handleClientSocketError(QAbstractSocket::SocketError socketError);
 
-    void onPendingSocketReadyRead(); // New slot to handle initial message from pending connection
-    void onPendingSocketDisconnected(); // New slot
-    void onPendingSocketError(QAbstractSocket::SocketError socketError); // New slot
+    // 处理等待HELLO消息的传入socket可读数据
+    void handlePendingIncomingSocketReadyRead();
+    // 处理等待HELLO消息的传入socket断开
+    void handlePendingIncomingSocketDisconnected();
+    // 处理等待HELLO消息的传入socket错误
+    void handlePendingIncomingSocketError(QAbstractSocket::SocketError socketError);
+
+    // 处理出站连接尝试成功建立TCP连接
+    void handleOutgoingSocketConnected();
+    // 处理出站连接等待SESSION_ACCEPTED消息时socket可读数据
+    void handleOutgoingSocketReadyRead();
+    // 处理出站连接的socket断开
+    void handleOutgoingSocketDisconnected();
+    // 处理出站连接的socket错误
+    void handleOutgoingSocketError(QAbstractSocket::SocketError socketError);
+
 
 private:
     QTcpServer *tcpServer;      // TCP服务器对象
-    QTcpSocket *clientSocket;   // 客户端socket对象
-    QTcpSocket *pendingClientSocket; // 新增：待处理的客户端socket对象
-    quint16 defaultPort;        // 默认端口
-    QString currentPeerName;    // 新增：当前连接对方的名称
-    QString currentPeerUuid;    // 新增：当前连接对方的UUID
-    QString lastError;          // 新增：最后发生的错误字符串
+    
+    // 管理已建立的连接
+    QMap<QString, QTcpSocket*> connectedSockets; // Key: Peer UUID
+    QMap<QTcpSocket*, QString> socketToUuidMap;  // Helper: Socket -> Peer UUID
+    QMap<QString, QString> peerUuidToNameMap; // Helper: Peer UUID -> Peer Name (as known locally)
 
-    quint16 connectedPeerPort;
+    // 管理正在建立的连接
+    QList<QTcpSocket*> pendingIncomingSockets; // Sockets from onNewConnection, waiting for HELLO
+    QMap<QTcpSocket*, QString> outgoingSocketsAwaitingSessionAccepted; // Key: Socket, Value: TentativePeerName for this outgoing connection
+
+    quint16 defaultPort;        // 默认端口 (保留，但首选端口更重要)
+    QString lastError;          // 最后发生的通用服务器错误字符串
 
     quint16 preferredListenPort;
-    quint16 preferredOutgoingPortNumber; // 新增：首选传出端口号
-    bool bindToSpecificOutgoingPort;  // 新增：是否绑定到特定的传出端口
-
-    // 新增状态和临时变量
-    bool isWaitingForPeerConfirmation;
-    QString pendingPeerNameToSet;
-    QString pendingPeerUuidToSet; // Renamed from pendingPeerUuidToSet for clarity on its use (client side)
-    quint16 pendingConnectedPeerPort;
-
-    // Temporary storage for incoming connection's initial info
-    QString tempPeerUuidFromHello;
-    QString tempPeerNameHintFromHello;
+    quint16 preferredOutgoingPortNumber;
+    bool bindToSpecificOutgoingPort;
 
     // 本地用户信息
     QString localUserUuid;
     QString localUserDisplayName;
 
     void setupServer();
+    void cleanupSocket(QTcpSocket* socket, bool removeFromConnectedSockets = true);
+    void sendSystemMessage(QTcpSocket* socket, const QString& sysMessage);
+    // 将socket添加到connectedSockets和相关映射中
+    void addEstablishedConnection(QTcpSocket* socket, const QString& peerUuid, const QString& peerName, const QString& peerAddress, quint16 peerPort);
+    // 从pendingIncomingSockets中移除socket并断开其临时信号槽
+    void removePendingIncomingSocket(QTcpSocket* socket);
+    // 从outgoingSocketsAwaitingSessionAccepted中移除socket并断开其临时信号槽
+    void removeOutgoingSocketAwaitingAcceptance(QTcpSocket* socket);
 };
 
 #endif // NETWORKMANAGER_H

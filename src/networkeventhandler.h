@@ -36,10 +36,10 @@ public:
         QObject *parent = nullptr);
 
 public slots:
-    void handleNetworkConnected();
-    void handleNetworkDisconnected();
-    void handleNewMessageReceived(const QString &message);
-    void handleNetworkError(QAbstractSocket::SocketError socketError);
+    void handlePeerConnected(const QString &peerUuid, const QString &peerName, const QString& peerAddress, quint16 peerPort);
+    void handlePeerDisconnected(const QString &peerUuid);
+    void handleNewMessageReceived(const QString &peerUuid, const QString &message);
+    void handlePeerNetworkError(const QString &peerUuid, QAbstractSocket::SocketError socketError, const QString& errorString);
 
 private:
     NetworkManager *networkManager;

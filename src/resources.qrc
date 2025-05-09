@@ -4,5 +4,7 @@
     <file alias="add_user.svg">../res/add_user.svg</file>
     <file alias="close.svg">../res/close.svg</file>
     <file alias="settings.svg">../res/settings.svg</file>
+    <file alias="online.svg">../res/online.svg</file>
+    <file alias="offline.svg">../res/offline.svg</file> <!-- 新增离线图标 -->
 </qresource>
 </RCC>

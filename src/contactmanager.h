@@ -23,10 +23,9 @@ signals:
 
 private slots:
     void handleConnectRequested(const QString &name, const QString &connectionType, const QString &ipAddress, quint16 port);
-    // Slots to handle NetworkManager's connection results
-    void onConnectionSuccess();
-    void onConnectionFailed();
-    void onTcpLinkEstablished(const QString& tentativePeerName); // 新槽
+    // 新的槽函数，用于处理来自 NetworkManager 的信号
+    void handlePeerSessionEstablished(const QString &peerUuid, const QString &peerName, const QString& peerAddress, quint16 peerPort);
+    void handleOutgoingConnectionAttemptFailed(const QString& peerNameAttempted, const QString& reason);
 
 private:
     NetworkManager* netManager; // Store a pointer to NetworkManager

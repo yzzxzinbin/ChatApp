@@ -125,7 +125,8 @@ private slots:
                                quint16 outgoingPort, bool useSpecificOutgoingPort); // 处理设置应用的槽函数
 
     // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)
-    void handleIncomingConnectionRequest(const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
+    // 更新签名以匹配 NetworkManager::incomingSessionRequest
+    void handleIncomingConnectionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
 
     // New slots to update MainWindow's color state from FormattingToolbarHandler
     void handleTextColorChanged(const QColor &color);
