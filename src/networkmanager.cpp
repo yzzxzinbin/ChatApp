@@ -22,9 +22,12 @@ QString extractAttribute(const QString& message, const QString& attributeName) {
 NetworkManager::NetworkManager(QObject *parent)
     : QObject(parent),
       tcpServer(nullptr),
+      udpSocket(nullptr),             // 新增：初始化udpSocket
+      udpBroadcastTimer(nullptr),     // 新增：初始化udpBroadcastTimer
       defaultPort(60248),
       preferredListenPort(60248),
       autoStartListeningEnabled(true), // 默认启用监听
+      udpDiscoveryEnabled(false),      // 新增：默认禁用UDP发现
       retryListenTimer(nullptr),
       retryListenIntervalMs(15000),   // 默认15秒重试间隔
       preferredOutgoingPortNumber(0),
@@ -35,6 +38,10 @@ NetworkManager::NetworkManager(QObject *parent)
     setupServer(); // Initial setup for the server
     retryListenTimer = new QTimer(this);
     connect(retryListenTimer, &QTimer::timeout, this, &NetworkManager::attemptToListen);
+
+    // 新增：初始化UDP广播定时器
+    udpBroadcastTimer = new QTimer(this);
+    connect(udpBroadcastTimer, &QTimer::timeout, this, &NetworkManager::sendUdpBroadcast);
 }
 
 NetworkManager::~NetworkManager()
@@ -42,8 +49,12 @@ NetworkManager::~NetworkManager()
     if (retryListenTimer) {
         retryListenTimer->stop();
     }
+    if (udpBroadcastTimer) { // 新增：停止UDP广播定时器
+        udpBroadcastTimer->stop();
+    }
 
     stopListening(); // This will also clean up connected sockets
+    stopUdpDiscovery(); // 新增：确保UDP也停止
 
     // Clean up any remaining pending sockets
     qDeleteAll(pendingIncomingSockets);
@@ -55,6 +66,10 @@ NetworkManager::~NetworkManager()
     if (tcpServer) {
         tcpServer->deleteLater(); // Ensure server is deleted
         tcpServer = nullptr;
+    }
+    if (udpSocket) { // 新增：清理UDP套接字
+        udpSocket->deleteLater();
+        udpSocket = nullptr;
     }
 }
 
@@ -336,6 +351,7 @@ void NetworkManager::setLocalUserDetails(const QString& uuid, const QString& dis
 void NetworkManager::setListenPreferences(quint16 port, bool autoStartListen) // 修改了签名
 {
     preferredListenPort = (port > 0) ? port : defaultPort;
+    bool oldAutoStartListeningEnabled = autoStartListeningEnabled;
     autoStartListeningEnabled = autoStartListen; // 设置用户是否希望监听
 
     // 如果用户禁用了监听，并且服务器正在监听或尝试重试，则停止它
@@ -346,18 +362,208 @@ void NetworkManager::setListenPreferences(quint16 port, bool autoStartListen) //
             retryListenTimer->stop();
             emit serverStatusMessage(tr("Network listening disabled by user. Retry stopped."));
         }
+    } else if (autoStartListeningEnabled && !oldAutoStartListeningEnabled && (!tcpServer || !tcpServer->isListening())) {
+        // 如果从禁用变为启用，并且当前未监听，则尝试启动
+        // 这通常由 MainWindow::handleSettingsApplied 中的 startListening() 调用处理，但作为备用
+        emit serverStatusMessage(tr("Network listening enabled. Will attempt to start if not already running."));
+        // startListening(); // 通常由外部调用
     }
-    // 如果用户启用了监听，但当前未监听且未在重试，则可以尝试启动一次
-    // 但通常 startListening() 会由 MainWindow 在设置应用后显式调用
 }
 
+// 实现 setOutgoingConnectionPreferences
 void NetworkManager::setOutgoingConnectionPreferences(quint16 port, bool useSpecific)
 {
     preferredOutgoingPortNumber = port;
     bindToSpecificOutgoingPort = useSpecific;
+    qDebug() << "NM::setOutgoingConnectionPreferences: Preferred Outgoing Port:" << preferredOutgoingPortNumber
+             << "Use Specific:" << bindToSpecificOutgoingPort;
+    // 此设置通常应用于新的传出连接，
+    // 因此除了存储值之外，通常此处不执行任何立即操作。
+    // connectToHost 方法将使用这些值。
+    emit serverStatusMessage(tr("Outgoing connection port preferences updated. Port: %1, Specific: %2")
+                             .arg(port == 0 ? tr("Dynamic") : QString::number(port))
+                             .arg(useSpecific ? tr("Yes") : tr("No")));
 }
 
-// --- Private Slots ---
+// 新增：设置UDP发现首选项
+void NetworkManager::setUdpDiscoveryPreferences(bool enabled)
+{
+    if (udpDiscoveryEnabled == enabled) return; // 没有变化
+
+    udpDiscoveryEnabled = enabled;
+    if (udpDiscoveryEnabled) {
+        startUdpDiscovery();
+    } else {
+        stopUdpDiscovery();
+    }
+}
+
+// 新增：启动UDP发现
+void NetworkManager::startUdpDiscovery()
+{
+    if (!udpDiscoveryEnabled) {
+        emit serverStatusMessage(tr("UDP discovery is disabled by user settings."));
+        return;
+    }
+
+    if (udpSocket && udpSocket->state() != QAbstractSocket::UnconnectedState) {
+        emit serverStatusMessage(tr("UDP discovery is already active on port %1.").arg(DISCOVERY_UDP_PORT));
+        if (!udpBroadcastTimer->isActive()) { // 确保广播定时器在运行
+             udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
+        }
+        return;
+    }
+
+    if (udpSocket) { // 清理旧的socket以防万一
+        udpSocket->close();
+        udpSocket->deleteLater();
+    }
+
+    udpSocket = new QUdpSocket(this);
+    connect(udpSocket, &QUdpSocket::readyRead, this, &NetworkManager::processPendingUdpDatagrams);
+    connect(udpSocket, &QUdpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError socketError){
+        Q_UNUSED(socketError);
+        emit serverStatusMessage(tr("UDP Socket Error: %1").arg(udpSocket->errorString()));
+        // 可以选择在这里停止并尝试重启UDP发现，或者仅记录错误
+        // stopUdpDiscovery();
+        // if(udpDiscoveryEnabled) QTimer::singleShot(1000, this, &NetworkManager::startUdpDiscovery); // 1秒后尝试重启
+    });
+
+
+    if (udpSocket->bind(QHostAddress::AnyIPv4, DISCOVERY_UDP_PORT, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
+        emit serverStatusMessage(tr("UDP discovery started, listening on port %1.").arg(DISCOVERY_UDP_PORT));
+        udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
+        sendUdpBroadcast(); // 立即发送一次广播
+    } else {
+        emit serverStatusMessage(tr("UDP discovery could not start on port %1: %2").arg(DISCOVERY_UDP_PORT).arg(udpSocket->errorString()));
+        if (udpSocket) {
+            udpSocket->deleteLater();
+            udpSocket = nullptr;
+        }
+    }
+}
+
+// 新增：停止UDP发现
+void NetworkManager::stopUdpDiscovery()
+{
+    if (udpBroadcastTimer && udpBroadcastTimer->isActive()) {
+        udpBroadcastTimer->stop();
+    }
+    if (udpSocket) {
+        if (udpSocket->state() != QAbstractSocket::UnconnectedState) {
+            udpSocket->close();
+            emit serverStatusMessage(tr("UDP discovery stopped."));
+        }
+        // udpSocket->deleteLater(); // 考虑是否立即删除或在析构时删除
+        // udpSocket = nullptr;
+    }
+}
+
+// 新增UDP相关槽函数实现
+void NetworkManager::sendUdpBroadcast()
+{
+    if (!udpSocket || !udpDiscoveryEnabled || localUserUuid.isEmpty() || !tcpServer || !tcpServer->isListening()) {
+        // 如果UDP未启用，或本地信息不完整，或TCP服务器未监听（无法告知对方TCP端口），则不广播
+        if (udpDiscoveryEnabled && (!tcpServer || !tcpServer->isListening())) {
+             qDebug() << "NM::sendUdpBroadcast: Skipping broadcast because TCP server is not listening.";
+        }
+        return;
+    }
+
+    QString message = QString("%1;UUID=%2;Name=%3;TCPPort=%4;")
+                          .arg(UDP_DISCOVERY_MSG_PREFIX)
+                          .arg(localUserUuid)
+                          .arg(localUserDisplayName) // 不再进行 HTML 转义
+                          .arg(tcpServer->serverPort());
+
+    QByteArray datagram = message.toUtf8();
+    qint64 bytesSent = udpSocket->writeDatagram(datagram, QHostAddress::Broadcast, DISCOVERY_UDP_PORT);
+
+    if (bytesSent == -1) {
+        emit serverStatusMessage(tr("UDP broadcast failed: %1").arg(udpSocket->errorString()));
+    } else {
+        qDebug() << "NM::sendUdpBroadcast: Sent" << bytesSent << "bytes:" << message;
+    }
+}
+
+void NetworkManager::processPendingUdpDatagrams()
+{
+    if (!udpSocket) return;
+
+    while (udpSocket->hasPendingDatagrams()) {
+        QByteArray datagram;
+        datagram.resize(udpSocket->pendingDatagramSize());
+        QHostAddress senderAddress;
+        quint16 senderPort; // 这是UDP发送方端口，不是对方TCP监听端口
+
+        udpSocket->readDatagram(datagram.data(), datagram.size(), &senderAddress, &senderPort);
+
+        QString message = QString::fromUtf8(datagram);
+        qDebug() << "NM::processPendingUdpDatagrams: Received from" << senderAddress.toString() << ":" << senderPort << "Data:" << message;
+
+        if (!message.startsWith(UDP_DISCOVERY_MSG_PREFIX)) { // 使用头文件中定义的常量
+            qDebug() << "NM::processPendingUdpDatagrams: Ignoring non-discovery message:" << message;
+            continue;
+        }
+
+        QStringList parts = message.split(';', Qt::SkipEmptyParts);
+        // Prefix, UUID, Name, TCPPort - 至少需要这4个部分
+        if (parts.length() < 4 || parts[0] != UDP_DISCOVERY_MSG_PREFIX) { 
+            qWarning() << "NM::processPendingUdpDatagrams: Malformed or non-matching prefix discovery message:" << message;
+            continue;
+        }
+
+        QString peerUuid;
+        QString peerNameHint;
+        quint16 peerTcpPort = 0;
+
+        for (const QString& part : parts) {
+            if (part.startsWith("UUID=")) {
+                peerUuid = part.mid(4); // "UUID=" 是4个字符
+            } else if (part.startsWith("Name=")) {
+                peerNameHint = part.mid(5); // "Name=" 是5个字符
+            } else if (part.startsWith("TCPPort=")) {
+                bool ok;
+                peerTcpPort = part.mid(8).toUShort(&ok); // "TCPPort=" 是8个字符
+                if (!ok) {
+                    qWarning() << "NM::processPendingUdpDatagrams: Invalid TCPPort in discovery message:" << message;
+                    peerTcpPort = 0; // Reset if conversion failed
+                }
+            }
+        }
+
+        if (peerUuid.isEmpty() || peerTcpPort == 0) {
+            qWarning() << "NM::processPendingUdpDatagrams: Missing UUID or TCPPort in discovery message:" << message;
+            continue;
+        }
+
+        if (peerUuid == localUserUuid) {
+            qDebug() << "NM::processPendingUdpDatagrams: Ignoring own broadcast.";
+            continue;
+        }
+
+        // 检查是否已连接
+        if (connectedSockets.contains(peerUuid)) {
+            qDebug() << "NM::processPendingUdpDatagrams: Peer" << peerUuid << "is already connected. Ignoring discovery.";
+            // 可以考虑更新IP/端口信息，如果它们变了
+            continue;
+        }
+        
+        // 检查是否正在尝试连接到此UUID (避免重复发起)
+        // (这部分逻辑比较复杂，暂时简化为不检查，直接尝试连接，connectToHost内部有自连接检查)
+
+        emit serverStatusMessage(tr("UDP Discovery: Found peer %1 (UUID: %2) at %3, TCP Port: %4. Attempting TCP connection.")
+                                 .arg(peerNameHint)
+                                 .arg(peerUuid)
+                                 .arg(senderAddress.toString())
+                                 .arg(peerTcpPort));
+        
+        // 使用发现的IP和TCP端口尝试建立TCP连接
+        // 注意：peerNameHint 是对方的名称，我们本地可能还没有为此UUID命名，
+        // connectToHost 的第一个参数是我们本地为此连接命名的名称，这里可以用 peerNameHint 或 peerUuid
+        connectToHost(peerNameHint.isEmpty() ? peerUuid : peerNameHint, peerUuid, senderAddress.toString(), peerTcpPort);
+    }
+}
 
 void NetworkManager::onNewConnection()
 {

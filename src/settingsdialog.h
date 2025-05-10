@@ -2,6 +2,7 @@
 #define SETTINGSDIALOG_H
 
 #include <QDialog>
+#include <QString> // Ensure QString is included
 
 QT_BEGIN_NAMESPACE
 class QLineEdit;
@@ -21,33 +22,40 @@ public:
     explicit SettingsDialog(const QString &currentUserName,
                             const QString &currentUserUuid,
                             quint16 currentListenPort,
-                            bool currentEnableListening, // 新增：当前是否启用监听
-                            quint16 currentOutgoingPort, bool useSpecificOutgoingPort,
+                            bool currentEnableListening,
+                            quint16 currentOutgoingPort, 
+                            bool currentUseSpecificOutgoingPort,
+                            bool currentEnableUdpDiscovery, // 新增
                             QWidget *parent = nullptr);
 
     QString getUserName() const;
     quint16 getListenPort() const;
-    bool isListeningEnabled() const; // 新增：获取是否启用监听
+    bool isListeningEnabled() const;
     quint16 getOutgoingPort() const;
     bool isSpecificOutgoingPortSelected() const;
+    bool isUdpDiscoveryEnabled() const; // 新增声明
 
     void updateFields(const QString &userName,
                       const QString &uuid,
                       quint16 listenPort,
-                      bool enableListening, // 新增
-                      quint16 outgoingPort, bool useSpecificOutgoing);
+                      bool enableListening,
+                      quint16 outgoingPort, 
+                      bool useSpecificOutgoingPort,
+                      bool enableUdpDiscovery); // 新增
 
 signals:
     void settingsApplied(const QString &userName,
                          quint16 listenPort,
-                         bool enableListening, // 新增
-                         quint16 outgoingPort, bool useSpecificOutgoingPort);
+                         bool enableListening,
+                         quint16 outgoingPort, 
+                         bool useSpecificOutgoingPort,
+                         bool enableUdpDiscovery); // 新增
     void retryListenNowRequested(); // 新增信号
 
 private slots:
     void onSaveButtonClicked();
     void onOutgoingPortSettingsChanged();
-    void onEnableListeningChanged(bool checked); // 新增
+    void onEnableListeningChanged(bool checked);
     void onRetryListenNowClicked(); // 新增槽函数
 
 private:
@@ -57,13 +65,15 @@ private:
     QLineEdit *userUuidEdit;
 
     // 监听端口设置
-    QCheckBox *enableListeningCheckBox; // 新增：启用监听的复选框
+    QCheckBox *enableListeningCheckBox;
     QSpinBox *listenPortSpinBox;
     QPushButton *retryListenButton; // 新增按钮
 
     // 传出端口设置
     QCheckBox *specifyOutgoingPortCheckBox;
     QSpinBox *outgoingPortSpinBox;
+
+    QCheckBox *udpDiscoveryCheckBox; // 新增：UDP发现复选框
 
     QPushButton *saveButton;
     QPushButton *cancelButton;
@@ -72,9 +82,10 @@ private:
     QString initialUserName;
     QString initialUserUuid;
     quint16 initialListenPort;
-    bool initialEnableListening; // 新增
+    bool initialEnableListening;
     quint16 initialOutgoingPort;
     bool initialUseSpecificOutgoingPort;
+    bool initialEnableUdpDiscovery; // 新增声明
 };
 
 #endif // SETTINGSDIALOG_H

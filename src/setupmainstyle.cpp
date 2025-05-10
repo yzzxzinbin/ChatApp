@@ -200,8 +200,8 @@ void MainWindow::setupUI()
         colorButton, bgColorButton,
         fontSizeComboBox, fontFamilyComboBox,
         currentTextColor, currentBgColor, // Pass initial colors
-        this, // Parent for QColorDialog
-        this  // Parent for the handler itself
+        this,                             // Parent for QColorDialog
+        this                              // Parent for the handler itself
     );
 
     // Connect formatting toolbar signals to FormattingToolbarHandler slots
@@ -282,4 +282,23 @@ void MainWindow::setupUI()
 
     // 为 messageInputEdit 安装事件过滤器
     messageInputEdit->installEventFilter(this); // 'this' 指向 MainWindow 实例
+}
+
+// 新增：实现 eventFilter 方法
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == messageInputEdit && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        // 检查是否是 Enter 键 (Qt::Key_Return 或 Qt::Key_Enter)
+        // 并且 Ctrl 修饰键被按下
+        if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) &&
+            (keyEvent->modifiers() & Qt::ControlModifier))
+        {
+            onSendButtonClicked(); // 调用发送按钮的槽函数
+            return true;           // 事件已处理，不再进一步传递
+        }
+    }
+    // 对于其他对象或其他事件，传递给基类处理
+    return QMainWindow::eventFilter(watched, event);
 }

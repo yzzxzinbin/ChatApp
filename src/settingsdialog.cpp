@@ -15,14 +15,18 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
                                const QString &currentUserUuid,
                                quint16 currentListenPort,
                                bool currentEnableListening,
-                               quint16 currentOutgoingPort, bool useSpecificOutgoingPort,
+                               quint16 currentOutgoingPort, 
+                               bool useSpecificOutgoingPort,
+                               bool currentEnableUdpDiscovery, // 新增
                                QWidget *parent)
     : QDialog(parent),
       initialUserName(currentUserName),
       initialUserUuid(currentUserUuid),
       initialListenPort(currentListenPort),
       initialEnableListening(currentEnableListening),
-      initialOutgoingPort(currentOutgoingPort), initialUseSpecificOutgoingPort(useSpecificOutgoingPort)
+      initialOutgoingPort(currentOutgoingPort), 
+      initialUseSpecificOutgoingPort(useSpecificOutgoingPort),
+      initialEnableUdpDiscovery(currentEnableUdpDiscovery) // 新增
 {
     setupUI();
     setWindowTitle(tr("Application Settings"));
@@ -49,9 +53,12 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
         outgoingPortSpinBox->setValue(0);
     }
     onOutgoingPortSettingsChanged();
+
+    // 初始化UDP发现设置
+    udpDiscoveryCheckBox->setChecked(currentEnableUdpDiscovery); // 新增
 }
 
-void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, bool enableListening, quint16 outgoingPort, bool useSpecificOutgoing)
+void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, bool enableListening, quint16 outgoingPort, bool useSpecificOutgoing, bool enableUdpDiscovery) // 新增
 {
     userNameEdit->setText(userName);
     userUuidEdit->setText(uuid);
@@ -72,6 +79,8 @@ void SettingsDialog::updateFields(const QString &userName, const QString &uuid, 
         outgoingPortSpinBox->setValue(0);
     }
     onOutgoingPortSettingsChanged();
+
+    udpDiscoveryCheckBox->setChecked(enableUdpDiscovery); // 新增
 }
 
 void SettingsDialog::setupUI()
@@ -137,6 +146,14 @@ void SettingsDialog::setupUI()
 
     connect(specifyOutgoingPortCheckBox, &QCheckBox::toggled, this, &SettingsDialog::onOutgoingPortSettingsChanged);
 
+    // UDP Discovery Section - 新增
+    QGroupBox *udpDiscoveryGroup = new QGroupBox(tr("LAN Peer Discovery (UDP)"), this);
+    QVBoxLayout *udpDiscoveryLayout = new QVBoxLayout();
+    udpDiscoveryCheckBox = new QCheckBox(tr("Enable UDP Auto Discovery & Connection"), this);
+    udpDiscoveryLayout->addWidget(udpDiscoveryCheckBox);
+    udpDiscoveryGroup->setLayout(udpDiscoveryLayout);
+    mainLayout->addWidget(udpDiscoveryGroup);
+
     // Buttons
     QHBoxLayout *buttonLayout = new QHBoxLayout();
     saveButton = new QPushButton(tr("Save"), this);
@@ -194,7 +211,9 @@ void SettingsDialog::onSaveButtonClicked()
         outgoingPort = static_cast<quint16>(outgoingPortSpinBox->value());
     }
 
-    emit settingsApplied(userName, listenPort, enableListening, outgoingPort, useSpecificOutgoing);
+    bool enableUdpDiscovery = udpDiscoveryCheckBox->isChecked(); // 新增
+
+    emit settingsApplied(userName, listenPort, enableListening, outgoingPort, useSpecificOutgoing, enableUdpDiscovery); // 新增：传递UDP复选框状态
     accept();
 }
 
@@ -227,4 +246,9 @@ quint16 SettingsDialog::getOutgoingPort() const
 bool SettingsDialog::isSpecificOutgoingPortSelected() const
 {
     return specifyOutgoingPortCheckBox->isChecked();
+}
+
+bool SettingsDialog::isUdpDiscoveryEnabled() const // 确保此定义与头文件中的声明匹配
+{
+    return udpDiscoveryCheckBox->isChecked();
 }

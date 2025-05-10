@@ -113,6 +113,7 @@ private:
     QString localUserUuid; // 新增：本地用户的UUID
     quint16 localListenPort;
     bool autoNetworkListeningEnabled; // 新增：用户是否启用了网络监听
+    bool udpDiscoveryEnabled;         // 新增：用户是否启用了UDP发现
     quint16 localOutgoingPort;
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
@@ -134,7 +135,8 @@ private slots:
     void handleSettingsApplied(const QString &userName,
                                quint16 listenPort,
                                bool enableListening, // 新增
-                               quint16 outgoingPort, bool useSpecificOutgoingPort); // 处理设置应用的槽函数
+                               quint16 outgoingPort, bool useSpecificOutgoingPort,
+                               bool enableUdpDiscovery); // 新增：处理UDP设置
     void handleRetryListenNow(); // 新增槽函数
 
     // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)

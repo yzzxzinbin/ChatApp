@@ -9,6 +9,12 @@
 #include <QStringList> // For getConnectedPeerUuids
 #include <QNetworkInterface> // Required for getting local IP addresses
 #include <QTimer> // 新增：用于重试监听
+#include <QUdpSocket> // 用于UDP发现
+
+// UDP发现相关常量
+const quint16 DISCOVERY_UDP_PORT = 60249; // UDP广播和监听的端口
+const int UDP_BROADCAST_INTERVAL_MS = 5000; // 5秒广播一次
+const QString UDP_DISCOVERY_MSG_PREFIX = "CHAT_DISCOVERY_V1";
 
 class NetworkManager : public QObject
 {
@@ -51,6 +57,13 @@ public:
     QString getLastError() const;
 
     void setLocalUserDetails(const QString& uuid, const QString& displayName);
+
+    // 新增：设置UDP发现首选项
+    void setUdpDiscoveryPreferences(bool enabled);
+    // 新增：启动UDP发现
+    void startUdpDiscovery();
+    // 新增：停止UDP发现
+    void stopUdpDiscovery();
 
 signals:
     // 对等方连接成功信号 (包含UUID, 名称, 地址, 端口)
@@ -109,8 +122,14 @@ private slots:
 
     void attemptToListen(); // 新增：重试监听的槽
 
+    // 新增UDP相关槽函数
+    void sendUdpBroadcast();
+    void processPendingUdpDatagrams();
+
 private:
     QTcpServer *tcpServer;      // TCP服务器对象
+    QUdpSocket *udpSocket;      // 新增：UDP套接字
+    QTimer *udpBroadcastTimer;  // 新增：UDP广播定时器
     
     // 管理已建立的连接
     QMap<QString, QTcpSocket*> connectedSockets; // Key: Peer UUID
@@ -133,6 +152,7 @@ private:
     QString localUserDisplayName;
 
     bool autoStartListeningEnabled; // 新增：用户是否启用了监听
+    bool udpDiscoveryEnabled;       // 新增：用户是否启用了UDP发现
     QTimer *retryListenTimer;       // 新增：重试监听的计时器
     int retryListenIntervalMs;      // 新增：重试间隔
 
