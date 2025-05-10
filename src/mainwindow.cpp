@@ -117,6 +117,14 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
+    // Explicitly stop network manager listening before Qt starts destroying child objects.
+    // This can help ensure network resources are released more gracefully.
+    if (networkManager)
+    {
+        qDebug() << "MainWindow::~MainWindow(): Explicitly stopping NetworkManager listening.";
+        networkManager->stopListening();
+    }
+
     // settingsDialog 如果被设置了父对象，会被 Qt 自动管理内存
     // formattingHandler is a child of MainWindow, so it will be deleted automatically.
     // peerInfoDisplayWidget is a child of MainWindow, so it will be deleted automatically.

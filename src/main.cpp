@@ -220,24 +220,31 @@ int main(int argc, char *argv[])
     qInfo() << "Application instance" << QCoreApplication::applicationName() << "finished with exit code" << result;
 
     // Cleanup
+    // 1. Uninstall the custom message handler.
+    //    This prevents further calls to customMessageOutput, especially during Qt objects' destruction.
+    qInstallMessageHandler(nullptr);
+
+    // 2. Close and delete the global log file.
+    if (g_logFile) {
+        // Any qInfo/qDebug after qInstallMessageHandler(nullptr) will go to console or default handler,
+        // not customMessageOutput, so it's safe to log here if needed, but generally not necessary.
+        if (g_logFile->isOpen()) {
+            g_logFile->close();
+        }
+        delete g_logFile;
+        g_logFile = nullptr;
+    }
+
+    // 3. Release shared memory.
     if (g_instanceLockMemory) {
-        // Detach from the shared memory segment. If this was the last process
-        // attached to it, the OS might release it. However, explicit destruction
-        // is not directly done via QSharedMemory unless you are the creator and
-        // no one else is attached, or using native APIs.
-        // For a lock, detaching is usually sufficient.
         if (g_instanceLockMemory->isAttached()) {
             g_instanceLockMemory->detach();
         }
         delete g_instanceLockMemory;
         g_instanceLockMemory = nullptr;
-        qInfo() << "Instance lock (SharedMemory) released.";
     }
-    if (g_logFile) {
-        qInfo() << "Closing main log file.";
-        g_logFile->close();
-        delete g_logFile;
-        g_logFile = nullptr;
-    }
+    
+    // MainWindow w and QApplication a will be destructed after main returns.
+    // By this point, the custom logger is disabled, preventing crashes related to it.
     return result;
 }
