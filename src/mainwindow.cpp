@@ -230,6 +230,7 @@ void MainWindow::onSettingsButtonClicked()
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
         connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNow); // 新增连接
+        connect(settingsDialog, &SettingsDialog::manualUdpBroadcastRequested, this, &MainWindow::handleManualUdpBroadcastRequested); // 新增连接
     }
     else
     {
@@ -358,6 +359,14 @@ void MainWindow::handleRetryListenNow() // 新增槽函数实现
             updateNetworkStatus(tr("Cannot attempt to listen: Network listening is disabled in settings."));
             QMessageBox::information(this, tr("Listening Disabled"), tr("Network listening is currently disabled in settings. Please enable it first."));
         }
+    }
+}
+
+void MainWindow::handleManualUdpBroadcastRequested() // 新增实现
+{
+    if (networkManager)
+    {
+        networkManager->triggerManualUdpBroadcast();
     }
 }
 
@@ -637,37 +646,46 @@ void MainWindow::updateNetworkStatus(const QString &status)
 void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
 {
     qDebug() << "MW::handleIncomingConnectionRequest: From" << peerAddress << ":" << peerPort << "PeerUUID:" << peerUuid << "NameHint:" << peerNameHint;
-    QMessageBox::StandardButton reply;
-    QString suggestedName = peerNameHint.isEmpty() ? peerAddress : peerNameHint;
 
-    // 查找现有联系人
+    // 检查是否是已知联系人
     for (int i = 0; i < contactListWidget->count(); ++i)
     {
         QListWidgetItem *item = contactListWidget->item(i);
         if (item->data(Qt::UserRole).toString() == peerUuid)
         {
-            QMessageBox::StandardButton reconReply = QMessageBox::question(this, tr("Existing Contact"),
-                                                                           tr("Contact '%1' (UUID: %2) is trying to connect from %3:%4.\nUpdate IP/Port and connect?")
-                                                                               .arg(item->text())
-                                                                               .arg(peerUuid)
-                                                                               .arg(peerAddress)
-                                                                               .arg(peerPort),
-                                                                           QMessageBox::Yes | QMessageBox::No);
-            if (reconReply == QMessageBox::Yes)
+            // 已知联系人，自动接受并更新信息
+            QString knownName = item->text();
+            updateNetworkStatus(tr("Auto-reconnecting with known contact '%1' (UUID: %2) from %3:%4.")
+                                    .arg(knownName)
+                                    .arg(peerUuid)
+                                    .arg(peerAddress)
+                                    .arg(peerPort));
+
+            // 更新存储的IP和端口信息 (如果变化)
+            bool infoChanged = false;
+            if (item->data(Qt::UserRole + 1).toString() != peerAddress)
             {
-                // 更新存储的IP和端口信息
                 item->setData(Qt::UserRole + 1, peerAddress);
-                item->setData(Qt::UserRole + 2, peerPort);
-                saveContacts(); // 保存更新后的信息
-                networkManager->acceptIncomingSession(tempSocket, peerUuid, item->text());
+                infoChanged = true;
             }
-            else
+            if (item->data(Qt::UserRole + 2).toUInt() != peerPort)
             {
-                networkManager->rejectIncomingSession(tempSocket);
+                item->setData(Qt::UserRole + 2, peerPort);
+                infoChanged = true;
             }
-            return;
+            if (infoChanged)
+            {
+                saveContacts(); // 保存更新后的信息
+            }
+
+            networkManager->acceptIncomingSession(tempSocket, peerUuid, knownName);
+            return; // 处理完毕，不再询问用户
         }
     }
+
+    // 未知联系人，按原有逻辑询问用户
+    QMessageBox::StandardButton reply;
+    QString suggestedName = peerNameHint.isEmpty() ? peerAddress : peerNameHint;
 
     reply = QMessageBox::question(this, tr("Incoming Connection"),
                                   tr("Accept connection from %1 (UUID: %2, Name Hint: '%3') at %4:%5?")
@@ -731,6 +749,7 @@ void MainWindow::loadContactsAndAttemptReconnection()
         QString uuid = settings.value("uuid").toString();
         QString name = settings.value("name").toString();
         QString ip = settings.value("ip").toString();
+        quint16 port = settings.value("port").toUInt(); // 读取保存的端口
 
         if (uuid.isEmpty() || name.isEmpty())
             continue;
@@ -742,7 +761,8 @@ void MainWindow::loadContactsAndAttemptReconnection()
             {
                 contactListWidget->item(j)->setText(name); // 更新名称
                 contactListWidget->item(j)->setData(Qt::UserRole + 1, ip);
-                contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg
+                contactListWidget->item(j)->setData(Qt::UserRole + 2, port); // 更新端口
+                contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg"));
                 found = true;
                 break;
             }
@@ -752,19 +772,20 @@ void MainWindow::loadContactsAndAttemptReconnection()
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
             item->setData(Qt::UserRole, uuid);
             item->setData(Qt::UserRole + 1, ip);
-            item->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg // 初始设置为离线
+            item->setData(Qt::UserRole + 2, port); // 保存端口
+            item->setIcon(QIcon(":/icons/offline.svg"));
         }
 
-        // 尝试重连
-        if (networkManager && !ip.isEmpty())
+        // 尝试重连 (IP直连) - 这部分已经是自动尝试，不需要用户确认
+        // NetworkManager 的 connectToHost 成功后会直接进入已连接状态
+        if (networkManager && !ip.isEmpty() && port > 0)
         {
-            quint16 targetListenPort = localListenPort; // 使用本应用的监听端口作为尝试连接对方的端口
             updateNetworkStatus(tr("Attempting to reconnect to %1 (%2) at %3:%4...")
                                     .arg(name)
                                     .arg(uuid)
                                     .arg(ip)
-                                    .arg(targetListenPort));
-            networkManager->connectToHost(name, uuid, ip, targetListenPort);
+                                    .arg(port)); // 使用保存的端口
+            networkManager->connectToHost(name, uuid, ip, port); // 使用保存的端口
         }
     }
     settings.endArray();

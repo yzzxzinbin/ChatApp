@@ -51,12 +51,15 @@ signals:
                          bool useSpecificOutgoingPort,
                          bool enableUdpDiscovery); // 新增
     void retryListenNowRequested(); // 新增信号
+    void manualUdpBroadcastRequested(); // 新增信号
 
 private slots:
     void onSaveButtonClicked();
     void onOutgoingPortSettingsChanged();
     void onEnableListeningChanged(bool checked);
     void onRetryListenNowClicked(); // 新增槽函数
+    void onUdpDiscoveryEnableChanged(bool checked); // 新增槽
+    void onManualBroadcastClicked(); // 新增槽
 
 private:
     void setupUI();
@@ -74,6 +77,7 @@ private:
     QSpinBox *outgoingPortSpinBox;
 
     QCheckBox *udpDiscoveryCheckBox; // 新增：UDP发现复选框
+    QPushButton *manualBroadcastButton; // 新增手动广播按钮
 
     QPushButton *saveButton;
     QPushButton *cancelButton;

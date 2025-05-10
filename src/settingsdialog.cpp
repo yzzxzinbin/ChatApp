@@ -56,6 +56,7 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
 
     // 初始化UDP发现设置
     udpDiscoveryCheckBox->setChecked(currentEnableUdpDiscovery); // 新增
+    manualBroadcastButton->setEnabled(currentEnableUdpDiscovery); // 设置初始状态
 }
 
 void SettingsDialog::updateFields(const QString &userName, const QString &uuid, quint16 listenPort, bool enableListening, quint16 outgoingPort, bool useSpecificOutgoing, bool enableUdpDiscovery) // 新增
@@ -81,6 +82,7 @@ void SettingsDialog::updateFields(const QString &userName, const QString &uuid, 
     onOutgoingPortSettingsChanged();
 
     udpDiscoveryCheckBox->setChecked(enableUdpDiscovery); // 新增
+    manualBroadcastButton->setEnabled(enableUdpDiscovery); // 更新状态
 }
 
 void SettingsDialog::setupUI()
@@ -150,7 +152,10 @@ void SettingsDialog::setupUI()
     QGroupBox *udpDiscoveryGroup = new QGroupBox(tr("LAN Peer Discovery (UDP)"), this);
     QVBoxLayout *udpDiscoveryLayout = new QVBoxLayout();
     udpDiscoveryCheckBox = new QCheckBox(tr("Enable UDP Auto Discovery & Connection"), this);
+    manualBroadcastButton = new QPushButton(tr("Broadcast Discovery Signal Now"), this); // 创建按钮
+    
     udpDiscoveryLayout->addWidget(udpDiscoveryCheckBox);
+    udpDiscoveryLayout->addWidget(manualBroadcastButton); // 添加按钮到布局
     udpDiscoveryGroup->setLayout(udpDiscoveryLayout);
     mainLayout->addWidget(udpDiscoveryGroup);
 
@@ -165,6 +170,8 @@ void SettingsDialog::setupUI()
 
     connect(saveButton, &QPushButton::clicked, this, &SettingsDialog::onSaveButtonClicked);
     connect(cancelButton, &QPushButton::clicked, this, &QDialog::reject);
+    connect(udpDiscoveryCheckBox, &QCheckBox::toggled, this, &SettingsDialog::onUdpDiscoveryEnableChanged); // 连接复选框信号
+    connect(manualBroadcastButton, &QPushButton::clicked, this, &SettingsDialog::onManualBroadcastClicked); // 连接按钮信号
 
     setLayout(mainLayout);
 }
@@ -173,6 +180,16 @@ void SettingsDialog::onEnableListeningChanged(bool checked)
 {
     listenPortSpinBox->setEnabled(checked);
     retryListenButton->setEnabled(checked); // 新增：控制按钮的可用性
+}
+
+void SettingsDialog::onUdpDiscoveryEnableChanged(bool checked) // 新增实现
+{
+    manualBroadcastButton->setEnabled(checked);
+}
+
+void SettingsDialog::onManualBroadcastClicked() // 新增实现
+{
+    emit manualUdpBroadcastRequested();
 }
 
 void SettingsDialog::onRetryListenNowClicked() // 新增槽函数实现

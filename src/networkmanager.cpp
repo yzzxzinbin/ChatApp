@@ -22,26 +22,21 @@ QString extractAttribute(const QString& message, const QString& attributeName) {
 NetworkManager::NetworkManager(QObject *parent)
     : QObject(parent),
       tcpServer(nullptr),
-      udpSocket(nullptr),             // 新增：初始化udpSocket
-      udpBroadcastTimer(nullptr),     // 新增：初始化udpBroadcastTimer
+      udpSocket(nullptr),             // 初始化udpSocket
       defaultPort(60248),
       preferredListenPort(60248),
-      autoStartListeningEnabled(true), // 默认启用监听
-      udpDiscoveryEnabled(false),      // 新增：默认禁用UDP发现
+      autoStartListeningEnabled(true),
+      udpDiscoveryEnabled(false),     
       retryListenTimer(nullptr),
-      retryListenIntervalMs(15000),   // 默认15秒重试间隔
+      retryListenIntervalMs(15000),
       preferredOutgoingPortNumber(0),
       bindToSpecificOutgoingPort(false),
       localUserUuid(),
       localUserDisplayName()
 {
-    setupServer(); // Initial setup for the server
+    setupServer(); 
     retryListenTimer = new QTimer(this);
     connect(retryListenTimer, &QTimer::timeout, this, &NetworkManager::attemptToListen);
-
-    // 新增：初始化UDP广播定时器
-    udpBroadcastTimer = new QTimer(this);
-    connect(udpBroadcastTimer, &QTimer::timeout, this, &NetworkManager::sendUdpBroadcast);
 }
 
 NetworkManager::~NetworkManager()
@@ -49,12 +44,9 @@ NetworkManager::~NetworkManager()
     if (retryListenTimer) {
         retryListenTimer->stop();
     }
-    if (udpBroadcastTimer) { // 新增：停止UDP广播定时器
-        udpBroadcastTimer->stop();
-    }
 
-    stopListening(); // This will also clean up connected sockets
-    stopUdpDiscovery(); // 新增：确保UDP也停止
+    stopListening(); 
+    stopUdpDiscovery(); 
 
     // Clean up any remaining pending sockets
     qDeleteAll(pendingIncomingSockets);
@@ -67,7 +59,7 @@ NetworkManager::~NetworkManager()
         tcpServer->deleteLater(); // Ensure server is deleted
         tcpServer = nullptr;
     }
-    if (udpSocket) { // 新增：清理UDP套接字
+    if (udpSocket) { // 清理UDP套接字
         udpSocket->deleteLater();
         udpSocket = nullptr;
     }
@@ -408,15 +400,13 @@ void NetworkManager::startUdpDiscovery()
 
     if (udpSocket && udpSocket->state() != QAbstractSocket::UnconnectedState) {
         emit serverStatusMessage(tr("UDP discovery is already active on port %1.").arg(DISCOVERY_UDP_PORT));
-        if (!udpBroadcastTimer->isActive()) { // 确保广播定时器在运行
-             udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        }
         return;
     }
 
-    if (udpSocket) { // 清理旧的socket以防万一
+    if (udpSocket) { 
         udpSocket->close();
         udpSocket->deleteLater();
+        udpSocket = nullptr; // Ensure it's null before creating a new one
     }
 
     udpSocket = new QUdpSocket(this);
@@ -424,16 +414,12 @@ void NetworkManager::startUdpDiscovery()
     connect(udpSocket, &QUdpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError socketError){
         Q_UNUSED(socketError);
         emit serverStatusMessage(tr("UDP Socket Error: %1").arg(udpSocket->errorString()));
-        // 可以选择在这里停止并尝试重启UDP发现，或者仅记录错误
-        // stopUdpDiscovery();
-        // if(udpDiscoveryEnabled) QTimer::singleShot(1000, this, &NetworkManager::startUdpDiscovery); // 1秒后尝试重启
     });
 
 
     if (udpSocket->bind(QHostAddress::AnyIPv4, DISCOVERY_UDP_PORT, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
         emit serverStatusMessage(tr("UDP discovery started, listening on port %1.").arg(DISCOVERY_UDP_PORT));
-        udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        sendUdpBroadcast(); // 立即发送一次广播
+        sendUdpBroadcast(); // 启动时立即发送一次广播
     } else {
         emit serverStatusMessage(tr("UDP discovery could not start on port %1: %2").arg(DISCOVERY_UDP_PORT).arg(udpSocket->errorString()));
         if (udpSocket) {
@@ -446,24 +432,33 @@ void NetworkManager::startUdpDiscovery()
 // 新增：停止UDP发现
 void NetworkManager::stopUdpDiscovery()
 {
-    if (udpBroadcastTimer && udpBroadcastTimer->isActive()) {
-        udpBroadcastTimer->stop();
-    }
     if (udpSocket) {
         if (udpSocket->state() != QAbstractSocket::UnconnectedState) {
             udpSocket->close();
             emit serverStatusMessage(tr("UDP discovery stopped."));
         }
-        // udpSocket->deleteLater(); // 考虑是否立即删除或在析构时删除
-        // udpSocket = nullptr;
     }
+}
+
+// 新增：手动触发UDP广播的实现
+void NetworkManager::triggerManualUdpBroadcast()
+{
+    if (!udpDiscoveryEnabled) {
+        emit serverStatusMessage(tr("Cannot send manual broadcast: UDP discovery is disabled."));
+        return;
+    }
+    if (!udpSocket || udpSocket->state() == QAbstractSocket::UnconnectedState) {
+        emit serverStatusMessage(tr("Cannot send manual broadcast: UDP socket not ready. Try enabling discovery first."));
+        return;
+    }
+    emit serverStatusMessage(tr("Sending manual UDP discovery broadcast..."));
+    sendUdpBroadcast();
 }
 
 // 新增UDP相关槽函数实现
 void NetworkManager::sendUdpBroadcast()
 {
     if (!udpSocket || !udpDiscoveryEnabled || localUserUuid.isEmpty() || !tcpServer || !tcpServer->isListening()) {
-        // 如果UDP未启用，或本地信息不完整，或TCP服务器未监听（无法告知对方TCP端口），则不广播
         if (udpDiscoveryEnabled && (!tcpServer || !tcpServer->isListening())) {
              qDebug() << "NM::sendUdpBroadcast: Skipping broadcast because TCP server is not listening.";
         }

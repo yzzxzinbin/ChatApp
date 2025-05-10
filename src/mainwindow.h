@@ -138,6 +138,7 @@ private slots:
                                quint16 outgoingPort, bool useSpecificOutgoingPort,
                                bool enableUdpDiscovery); // 新增：处理UDP设置
     void handleRetryListenNow(); // 新增槽函数
+    void handleManualUdpBroadcastRequested(); // 新增槽
 
     // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)
     // 更新签名以匹配 NetworkManager::incomingSessionRequest

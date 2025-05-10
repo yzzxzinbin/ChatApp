@@ -8,7 +8,7 @@
 #include <QMap>
 #include <QStringList> // For getConnectedPeerUuids
 #include <QNetworkInterface> // Required for getting local IP addresses
-#include <QTimer> // 新增：用于重试监听
+#include <QTimer> // QTimer for retryListenTimer
 #include <QUdpSocket> // 用于UDP发现
 
 // UDP发现相关常量
@@ -92,6 +92,8 @@ public slots:
     void acceptIncomingSession(QTcpSocket* tempSocket, const QString& peerUuid, const QString& localNameForPeer);
     // 拒绝传入的会话
     void rejectIncomingSession(QTcpSocket* tempSocket);
+    // 新增：手动触发UDP广播
+    void triggerManualUdpBroadcast();
 
 private slots:
     // 处理服务器的新连接请求
@@ -123,13 +125,12 @@ private slots:
     void attemptToListen(); // 新增：重试监听的槽
 
     // 新增UDP相关槽函数
-    void sendUdpBroadcast();
+    void sendUdpBroadcast(); // 保持声明，但不再由定时器调用
     void processPendingUdpDatagrams();
 
 private:
     QTcpServer *tcpServer;      // TCP服务器对象
-    QUdpSocket *udpSocket;      // 新增：UDP套接字
-    QTimer *udpBroadcastTimer;  // 新增：UDP广播定时器
+    QUdpSocket *udpSocket;      // UDP套接字
     
     // 管理已建立的连接
     QMap<QString, QTcpSocket*> connectedSockets; // Key: Peer UUID
