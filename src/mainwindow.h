@@ -8,6 +8,7 @@
 #include <QStringList> // For chat history
 #include <QUuid> // For UUID generation
 #include <QSettings> // For storing UUID
+#include <QKeyEvent> // 新增：包含 QKeyEvent
 #include "chatmessagedisplay.h" // 添加自定义组件头文件
 #include "networkmanager.h" // Include NetworkManager
 
@@ -44,6 +45,9 @@ public:
     void updateNetworkStatus(const QString &status); // Make updateNetworkStatus public
     void loadOrCreateUserIdentity(); // 新增方法
     void saveChatHistory(const QString& peerUuid); // 确保此方法是 public 或 NetworkEventHandler 可以访问
+
+protected: // 新增：或者 public，取决于您的偏好
+    bool eventFilter(QObject *watched, QEvent *event) override;
 
 public slots:
     void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port); // 更新签名以包含IP和端口，用于持久化

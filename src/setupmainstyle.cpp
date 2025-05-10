@@ -279,4 +279,7 @@ void MainWindow::setupUI()
     underlineButton->setFixedSize(30, 30);
     colorButton->setFixedSize(30, 30);
     bgColorButton->setFixedSize(30, 30);
+
+    // 为 messageInputEdit 安装事件过滤器
+    messageInputEdit->installEventFilter(this); // 'this' 指向 MainWindow 实例
 }

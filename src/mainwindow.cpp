@@ -31,6 +31,7 @@
 #include <QUuid>
 #include <QSettings>
 #include <QDebug> // Ensure QDebug is included for qDebug()
+#include <QEvent> // 新增：包含 QEvent，尽管 QKeyEvent 可能已间接包含它
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
@@ -124,6 +125,25 @@ MainWindow::~MainWindow()
 
     // 确保在程序退出前，当前打开的聊天记录被保存（如果需要）
     // 实际上，每次消息变动时都保存是更稳妥的做法，这里可能不需要额外操作
+}
+
+// 新增：实现 eventFilter 方法
+bool MainWindow::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == messageInputEdit && event->type() == QEvent::KeyPress)
+    {
+        QKeyEvent *keyEvent = static_cast<QKeyEvent *>(event);
+        // 检查是否是 Enter 键 (Qt::Key_Return 或 Qt::Key_Enter)
+        // 并且 Ctrl 修饰键被按下
+        if ((keyEvent->key() == Qt::Key_Return || keyEvent->key() == Qt::Key_Enter) &&
+            (keyEvent->modifiers() & Qt::ControlModifier))
+        {
+            onSendButtonClicked(); // 调用发送按钮的槽函数
+            return true;           // 事件已处理，不再进一步传递
+        }
+    }
+    // 对于其他对象或其他事件，传递给基类处理
+    return QMainWindow::eventFilter(watched, event);
 }
 
 void MainWindow::loadOrCreateUserIdentity()
