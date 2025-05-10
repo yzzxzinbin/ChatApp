@@ -67,7 +67,7 @@ private:
     QWidget *activeChatContentsWidget;
     QVBoxLayout *activeChatContentsLayout;
 
-    // 替换QTextBrowser为自定义组件
+    // 使用自定义组件显示消息历史
     ChatMessageDisplay *messageDisplay;
 
     QWidget *formattingToolbarWidget;
