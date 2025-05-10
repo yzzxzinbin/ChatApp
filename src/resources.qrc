@@ -6,5 +6,6 @@
     <file alias="settings.svg">../res/settings.svg</file>
     <file alias="online.svg">../res/online.svg</file>
     <file alias="offline.svg">../res/offline.svg</file> <!-- 新增离线图标 -->
+    <file alias="app_logo.ico">../res/logo.ico</file>
 </qresource>
 </RCC>

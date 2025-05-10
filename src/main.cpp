@@ -7,6 +7,7 @@
 #include <iostream> // For stderr output
 #include <QSharedMemory> // Required for instance management using shared memory
 #include <QSettings>    // To log settings file path
+#include <QIcon>      // 新增：用于设置图标
 
 // Global shared memory object to lock the instance name
 static QSharedMemory* g_instanceLockMemory = nullptr;
@@ -206,9 +207,13 @@ int main(int argc, char *argv[])
     QSettings settings; 
     qInfo() << "Settings file for this instance will be at:" << settings.fileName();
 
+    qInfo() << "Attempting to construct MainWindow...";
     MainWindow w;
-    w.setWindowTitle(QString("%1 - ChatApp").arg(QCoreApplication::applicationName()));
+    qInfo() << "MainWindow constructed. Attempting to show...";
+    w.setWindowIcon(QIcon(":/icons/app_logo.ico")); // 新增：设置窗口图标
+    w.setWindowTitle(QString("%1 - By CCZU_ZX").arg(QCoreApplication::applicationName()));
     w.show();
+    qInfo() << "MainWindow show() called.";
 
     int result = a.exec();
 

@@ -1,12 +1,13 @@
 #include "mainwindow.h"
 #include "contactmanager.h"
 #include "chatmessagedisplay.h"
-#include "networkmanager.h" // 确保包含了 NetworkManager
-#include "settingsdialog.h" // 确保包含了 SettingsDialog
-#include "peerinfowidget.h" // Include the new PeerInfoWidget header
-#include "styleutils.h"     // Include the new StyleUtils header
+#include "networkmanager.h"           // 确保包含了 NetworkManager
+#include "settingsdialog.h"           // 确保包含了 SettingsDialog
+#include "peerinfowidget.h"           // Include the new PeerInfoWidget header
+#include "styleutils.h"               // Include the new StyleUtils header
 #include "formattingtoolbarhandler.h" // Include the new FormattingToolbarHandler header
-#include "networkeventhandler.h" // Include the new NetworkEventHandler header
+#include "networkeventhandler.h"      // Include the new NetworkEventHandler header
+#include "chathistorymanager.h"       // 新增：包含 ChatHistoryManager
 
 #include <QApplication>
 #include <QListWidget>
@@ -33,17 +34,20 @@
 
 MainWindow::MainWindow(QWidget *parent)
     : QMainWindow(parent),
-      settingsDialog(nullptr),       // 初始化 settingsDialog 为 nullptr
-      localUserName(tr("Me")),       // 默认用户名
-      localUserUuid(QString()),      // 初始化UUID为空
-      localListenPort(60248),        // 默认监听端口 60248
+      networkManager(nullptr),           // 初始化 networkManager 为 nullptr
+      settingsDialog(nullptr),           // 初始化 settingsDialog 为 nullptr
+      localUserName(tr("Me")),           // 默认用户名
+      localUserUuid(QString()),          // 初始化UUID为空
+      localListenPort(60248),            // 默认监听端口 60248
       autoNetworkListeningEnabled(true), // 新增：默认启用监听
-      localOutgoingPort(0),          // 默认传出端口为0 (动态)
-      useSpecificOutgoingPort(false) // 默认不指定传出端口
+      localOutgoingPort(0),              // 默认传出端口为0 (动态)
+      useSpecificOutgoingPort(false)     // 默认不指定传出端口
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
+    loadOrCreateUserIdentity();
 
-    loadOrCreateUserIdentity(); // 加载或创建用户UUID和名称
+    chatHistoryManager = new ChatHistoryManager(QCoreApplication::applicationName(), this); // 新增：创建 ChatHistoryManager
+                                                                                            // 加载或创建用户UUID和名称
 
     // 1. 首先初始化 NetworkManager
     networkManager = new NetworkManager(this);
@@ -78,7 +82,7 @@ MainWindow::MainWindow(QWidget *parent)
         this            // Parent object
     );
 
-    setWindowTitle("Chat Application");
+    setWindowTitle("ChatApp - " + localUserName + "By CCZU_ZX");
     resize(1024, 768);
 
     // Connect NetworkManager signals to NetworkEventHandler slots
@@ -100,9 +104,12 @@ MainWindow::MainWindow(QWidget *parent)
     loadContactsAndAttemptReconnection();
 
     // 2. 重连阶段结束后，再根据设置决定是否开始监听端口
-    if (autoNetworkListeningEnabled) { // 检查用户设置
+    if (autoNetworkListeningEnabled)
+    { // 检查用户设置
         networkManager->startListening();
-    } else {
+    }
+    else
+    {
         updateNetworkStatus(tr("Network listening is disabled in settings."));
     }
 }
@@ -113,6 +120,10 @@ MainWindow::~MainWindow()
     // formattingHandler is a child of MainWindow, so it will be deleted automatically.
     // peerInfoDisplayWidget is a child of MainWindow, so it will be deleted automatically.
     // networkEventHandler is a child of MainWindow, so it will be deleted automatically.
+    // chatHistoryManager is a child of MainWindow, so it will be deleted automatically.
+
+    // 确保在程序退出前，当前打开的聊天记录被保存（如果需要）
+    // 实际上，每次消息变动时都保存是更稳妥的做法，这里可能不需要额外操作
 }
 
 void MainWindow::loadOrCreateUserIdentity()
@@ -145,12 +156,20 @@ void MainWindow::loadOrCreateUserIdentity()
     autoNetworkListeningEnabled = settings.value("User/AutoNetworkListeningEnabled", true).toBool(); // 新增加载
     localOutgoingPort = settings.value("User/OutgoingPort", 0).toUInt();
     useSpecificOutgoingPort = settings.value("User/UseSpecificOutgoingPort", false).toBool();
-
+    qInfo() << "MW::loadOrCreateUserIdentity: Loaded settings:"
+            << "UserName:" << localUserName
+            << "UUID:" << localUserUuid
+            << "ListenPort:" << localListenPort
+            << "AutoNetworkListeningEnabled:" << autoNetworkListeningEnabled
+            << "OutgoingPort:" << localOutgoingPort
+            << "UseSpecificOutgoingPort:" << useSpecificOutgoingPort;
     // 更新NetworkManager的设置，以防它们在settingsDialog之外被更改（例如，首次运行）
-    if (networkManager) {
+    if (networkManager)
+    {
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled); // 传递启用状态
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
     }
+    qInfo() << "MW::loadOrCreateUserIdentity: Loaded user identity completed:" << localUserName << localUserUuid;
 }
 
 QString MainWindow::getLocalUserName() const
@@ -177,7 +196,7 @@ void MainWindow::onClearButtonClicked()
     }
     defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
     defaultFormat.setForeground(currentTextColor); // Use MainWindow's currentTextColor
-    defaultFormat.setBackground(currentBgColor); // Use MainWindow's currentBgColor
+    defaultFormat.setBackground(currentBgColor);   // Use MainWindow's currentBgColor
     messageInputEdit->setCurrentCharFormat(defaultFormat);
 }
 
@@ -214,7 +233,7 @@ void MainWindow::handleSettingsApplied(const QString &userName,
                                        quint16 outgoingPort, bool useSpecificOutgoingPortVal)
 {
     bool settingsChanged = false;
-    QSettings settings; 
+    QSettings settings;
     bool listeningPrefsChanged = false; // 重命名以更清晰
 
     if (localUserName != userName)
@@ -228,26 +247,32 @@ void MainWindow::handleSettingsApplied(const QString &userName,
         settingsChanged = true;
     }
 
-    if (localListenPort != listenPort) {
+    if (localListenPort != listenPort)
+    {
         localListenPort = listenPort;
         settings.setValue("User/ListenPort", localListenPort);
         settingsChanged = true;
         listeningPrefsChanged = true;
     }
     // 检查监听启用状态是否改变
-    if (autoNetworkListeningEnabled != enableListening) {
+    if (autoNetworkListeningEnabled != enableListening)
+    {
         autoNetworkListeningEnabled = enableListening;
         settings.setValue("User/AutoNetworkListeningEnabled", autoNetworkListeningEnabled);
         settingsChanged = true;
         listeningPrefsChanged = true;
     }
 
-    if (listeningPrefsChanged) {
+    if (listeningPrefsChanged)
+    {
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
-        if (autoNetworkListeningEnabled) {
+        if (autoNetworkListeningEnabled)
+        {
             updateNetworkStatus(tr("Listener settings changed. Attempting to start listener..."));
             networkManager->startListening(); // 明确尝试启动监听
-        } else {
+        }
+        else
+        {
             updateNetworkStatus(tr("Network listening disabled. Stopping listener..."));
             networkManager->stopListening(); // 明确停止监听
         }
@@ -257,7 +282,7 @@ void MainWindow::handleSettingsApplied(const QString &userName,
     {
         localOutgoingPort = outgoingPort;
         useSpecificOutgoingPort = useSpecificOutgoingPortVal;
-        settings.setValue("User/OutgoingPort", localOutgoingPort); // 保存传出端口
+        settings.setValue("User/OutgoingPort", localOutgoingPort);                  // 保存传出端口
         settings.setValue("User/UseSpecificOutgoingPort", useSpecificOutgoingPort); // 保存选项
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
         settingsChanged = true;
@@ -280,11 +305,15 @@ void MainWindow::handleSettingsApplied(const QString &userName,
 
 void MainWindow::handleRetryListenNow() // 新增槽函数实现
 {
-    if (networkManager) {
-        if (autoNetworkListeningEnabled) {
+    if (networkManager)
+    {
+        if (autoNetworkListeningEnabled)
+        {
             updateNetworkStatus(tr("Attempting to listen on port %1 now...").arg(localListenPort));
             networkManager->startListening();
-        } else {
+        }
+        else
+        {
             updateNetworkStatus(tr("Cannot attempt to listen: Network listening is disabled in settings."));
             QMessageBox::information(this, tr("Listening Disabled"), tr("Network listening is currently disabled in settings. Please enable it first."));
         }
@@ -319,19 +348,14 @@ void MainWindow::handleContactAdded(const QString &name, const QString &uuid, co
         }
     }
 
-    if (!itemToSelect) {
+    if (!itemToSelect)
+    {
         itemToSelect = new QListWidgetItem(name, contactListWidget);
-        itemToSelect->setData(Qt::UserRole, uuid); // Store UUID in item's data
+        itemToSelect->setData(Qt::UserRole, uuid);     // Store UUID in item's data
         itemToSelect->setData(Qt::UserRole + 1, ip);   // Store IP
         itemToSelect->setData(Qt::UserRole + 2, port); // Store Port
         // 初始设置为离线图标，连接成功后 NetworkEventHandler 会更新
         itemToSelect->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg
-    }
-
-
-    if (chatHistories.find(uuid) == chatHistories.end())
-    { 
-        chatHistories[uuid] = QStringList();
     }
 
     saveContacts(); // 保存联系人列表
@@ -344,50 +368,70 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
     {
         currentOpenChatContactName = current->text(); // 这仍然可以用于UI显示，但UUID是关键
         QString peerUuid = current->data(Qt::UserRole).toString();
-        
-        if (peerUuid.isEmpty()) {
+
+        if (peerUuid.isEmpty())
+        {
             qWarning() << "Selected contact" << currentOpenChatContactName << "has no UUID.";
-            if (peerInfoDisplayWidget) peerInfoDisplayWidget->clearDisplay();
+            if (peerInfoDisplayWidget)
+                peerInfoDisplayWidget->clearDisplay();
             messageDisplay->clear();
             messageInputEdit->clear();
             messageInputEdit->setEnabled(false);
-            if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel) {
+            if (chatStackedWidget->currentWidget() != emptyChatPlaceholderLabel)
+            {
                 chatStackedWidget->setCurrentWidget(emptyChatPlaceholderLabel);
             }
             return;
         }
 
         // 更新 PeerInfoWidget
-        if (networkManager && peerInfoDisplayWidget) {
+        if (networkManager && peerInfoDisplayWidget)
+        {
             QAbstractSocket::SocketState state = networkManager->getPeerSocketState(peerUuid);
-            if (state == QAbstractSocket::ConnectedState) {
-                QPair<QString, quint16> netInfo = networkManager->getPeerInfo(peerUuid); 
+            if (state == QAbstractSocket::ConnectedState)
+            {
+                QPair<QString, quint16> netInfo = networkManager->getPeerInfo(peerUuid);
                 QString ipAddr = networkManager->getPeerIpAddress(peerUuid);
                 peerInfoDisplayWidget->updateDisplay(netInfo.first, peerUuid, ipAddr, netInfo.second);
                 // 如果连接成功，并且 IP/端口与存储的不同，则更新并保存
                 if (current->data(Qt::UserRole + 1).toString() != ipAddr ||
-                    current->data(Qt::UserRole + 2).toUInt() != netInfo.second) {
+                    current->data(Qt::UserRole + 2).toUInt() != netInfo.second)
+                {
                     current->setData(Qt::UserRole + 1, ipAddr);
                     current->setData(Qt::UserRole + 2, netInfo.second);
                     saveContacts();
                 }
-                 messageInputEdit->setEnabled(true);
-            } else {
+                messageInputEdit->setEnabled(true);
+            }
+            else
+            {
                 // 对等方可能在联系人列表中，但当前未连接
                 peerInfoDisplayWidget->updateDisplay(currentOpenChatContactName, peerUuid, tr("Not Connected"), 0);
-                 messageInputEdit->setEnabled(false); // 如果未连接，则禁用输入
+                messageInputEdit->setEnabled(false); // 如果未连接，则禁用输入
             }
         }
 
-
         QStringList messagesToDisplay;
+        // 检查内存中是否已有此会话的聊天记录 (即本会话期间是否已加载过)
         if (chatHistories.contains(peerUuid))
         {
             messagesToDisplay = chatHistories.value(peerUuid);
+            qDebug() << "onContactSelected: Using in-memory history for" << peerUuid << "Count:" << messagesToDisplay.count();
         }
         else
         {
-            chatHistories[peerUuid] = QStringList(); // 为新的UUID初始化历史记录
+            // 如果内存中没有，则从文件加载
+            if (chatHistoryManager)
+            {
+                messagesToDisplay = chatHistoryManager->loadChatHistory(peerUuid);
+                chatHistories[peerUuid] = messagesToDisplay; // 将加载的记录（或空列表）存入内存
+                qDebug() << "onContactSelected: Loaded history using ChatHistoryManager for" << peerUuid << "Count:" << messagesToDisplay.count();
+            }
+            else
+            {
+                qWarning() << "onContactSelected: ChatHistoryManager is null. Cannot load history for" << peerUuid;
+                chatHistories[peerUuid] = QStringList(); // 如果管理器为空，则为此UUID在内存中设置一个空列表
+            }
         }
 
         messageDisplay->setMessages(messagesToDisplay);
@@ -400,17 +444,20 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
             chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
         }
         // 根据连接状态启用/禁用输入框
-        if (networkManager && networkManager->getPeerSocketState(peerUuid) == QAbstractSocket::ConnectedState) {
+        if (networkManager && networkManager->getPeerSocketState(peerUuid) == QAbstractSocket::ConnectedState)
+        {
             messageInputEdit->setEnabled(true);
-        } else {
+        }
+        else
+        {
             messageInputEdit->setEnabled(false);
         }
-
     }
     else
     {
         currentOpenChatContactName.clear();
-        if (peerInfoDisplayWidget) peerInfoDisplayWidget->clearDisplay();
+        if (peerInfoDisplayWidget)
+            peerInfoDisplayWidget->clearDisplay();
         messageDisplay->clear();
         messageInputEdit->clear();
         messageInputEdit->setEnabled(false);
@@ -424,13 +471,15 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
 void MainWindow::onSendButtonClicked()
 {
     QListWidgetItem *currentItem = contactListWidget->currentItem();
-    if (!currentItem) {
+    if (!currentItem)
+    {
         updateNetworkStatus(tr("No active chat selected."));
         return;
     }
 
     QString targetPeerUuid = currentItem->data(Qt::UserRole).toString();
-    if (targetPeerUuid.isEmpty()) {
+    if (targetPeerUuid.isEmpty())
+    {
         updateNetworkStatus(tr("Selected contact has no UUID. Cannot send message."));
         QMessageBox::warning(this, tr("Error"), tr("Selected contact has no UUID."));
         return;
@@ -482,11 +531,14 @@ void MainWindow::onSendButtonClicked()
         if (!activeContactUuid.isEmpty())
         {
             chatHistories[activeContactUuid].append(userMessageHtml); // Use UUID for history key
+            saveChatHistory(activeContactUuid);                       // 调用 MainWindow::saveChatHistory
         }
         else
         {
             qWarning() << "Sending message: Active contact" << currentOpenChatContactName << "has no UUID. Using name as fallback for history.";
             chatHistories[currentOpenChatContactName].append(userMessageHtml);
+            // 注意：如果使用name作为fallback，保存时也应该用name，但这通常不推荐
+            // chatHistoryManager->saveChatHistory(currentOpenChatContactName, chatHistories.value(currentOpenChatContactName));
         }
 
         messageDisplay->addMessage(userMessageHtml);
@@ -505,7 +557,7 @@ void MainWindow::onSendButtonClicked()
         }
         defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
         defaultFormat.setForeground(currentTextColor); // Use MainWindow's currentTextColor
-        defaultFormat.setBackground(currentBgColor); // Use MainWindow's currentBgColor
+        defaultFormat.setBackground(currentBgColor);   // Use MainWindow's currentBgColor
         messageInputEdit->setCurrentCharFormat(defaultFormat);
 
         messageInputEdit->setFocus();
@@ -530,15 +582,18 @@ void MainWindow::updateNetworkStatus(const QString &status)
     }
     else
     {
-        if (statusBar()) { // Ensure statusBar is valid
+        if (statusBar())
+        { // Ensure statusBar is valid
             statusBar()->showMessage(status, 5000);
-        } else {
+        }
+        else
+        {
             qWarning() << "statusBar is null, cannot show status message:" << status;
         }
     }
 }
 
-void MainWindow::handleIncomingConnectionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
+void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
 {
     qDebug() << "MW::handleIncomingConnectionRequest: From" << peerAddress << ":" << peerPort << "PeerUUID:" << peerUuid << "NameHint:" << peerNameHint;
     QMessageBox::StandardButton reply;
@@ -607,10 +662,12 @@ void MainWindow::handleIncomingConnectionRequest(QTcpSocket* tempSocket, const Q
     }
 }
 
-void MainWindow::saveContacts() {
+void MainWindow::saveContacts()
+{
     QSettings settings;
     settings.beginWriteArray("Contacts");
-    for (int i = 0; i < contactListWidget->count(); ++i) {
+    for (int i = 0; i < contactListWidget->count(); ++i)
+    {
         QListWidgetItem *item = contactListWidget->item(i);
         settings.setArrayIndex(i);
         settings.setValue("uuid", item->data(Qt::UserRole).toString());
@@ -619,24 +676,29 @@ void MainWindow::saveContacts() {
         settings.setValue("port", item->data(Qt::UserRole + 2).toUInt());
     }
     settings.endArray();
-    settings.sync(); //确保立即写入
+    settings.sync(); // 确保立即写入
     updateNetworkStatus(tr("Contacts saved."));
 }
 
-void MainWindow::loadContactsAndAttemptReconnection() {
+void MainWindow::loadContactsAndAttemptReconnection()
+{
     QSettings settings;
     int size = settings.beginReadArray("Contacts");
-    for (int i = 0; i < size; ++i) {
+    for (int i = 0; i < size; ++i)
+    {
         settings.setArrayIndex(i);
         QString uuid = settings.value("uuid").toString();
         QString name = settings.value("name").toString();
         QString ip = settings.value("ip").toString();
 
-        if (uuid.isEmpty() || name.isEmpty()) continue;
+        if (uuid.isEmpty() || name.isEmpty())
+            continue;
 
         bool found = false;
-        for(int j=0; j < contactListWidget->count(); ++j) {
-            if(contactListWidget->item(j)->data(Qt::UserRole).toString() == uuid) {
+        for (int j = 0; j < contactListWidget->count(); ++j)
+        {
+            if (contactListWidget->item(j)->data(Qt::UserRole).toString() == uuid)
+            {
                 contactListWidget->item(j)->setText(name); // 更新名称
                 contactListWidget->item(j)->setData(Qt::UserRole + 1, ip);
                 contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg
@@ -644,28 +706,53 @@ void MainWindow::loadContactsAndAttemptReconnection() {
                 break;
             }
         }
-        if (!found) {
+        if (!found)
+        {
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
             item->setData(Qt::UserRole, uuid);
             item->setData(Qt::UserRole + 1, ip);
             item->setIcon(QIcon(":/icons/offline.svg")); // CHANGED .png to .svg // 初始设置为离线
-             if (chatHistories.find(uuid) == chatHistories.end()) {
-                chatHistories[uuid] = QStringList();
-            }
         }
-        
+
         // 尝试重连
-        if (networkManager && !ip.isEmpty()) {
+        if (networkManager && !ip.isEmpty())
+        {
             quint16 targetListenPort = localListenPort; // 使用本应用的监听端口作为尝试连接对方的端口
             updateNetworkStatus(tr("Attempting to reconnect to %1 (%2) at %3:%4...")
-                                .arg(name).arg(uuid).arg(ip).arg(targetListenPort));
+                                    .arg(name)
+                                    .arg(uuid)
+                                    .arg(ip)
+                                    .arg(targetListenPort));
             networkManager->connectToHost(name, uuid, ip, targetListenPort);
         }
     }
     settings.endArray();
-    if (size > 0) {
+    if (size > 0)
+    {
         updateNetworkStatus(tr("Loaded %1 contacts. Attempting reconnections...").arg(size));
-    } else {
+    }
+    else
+    {
         updateNetworkStatus(tr("No saved contacts found."));
+    }
+}
+
+void MainWindow::saveChatHistory(const QString &peerUuid)
+{
+    if (chatHistoryManager && chatHistories.contains(peerUuid))
+    {
+        if (!chatHistoryManager->saveChatHistory(peerUuid, chatHistories.value(peerUuid)))
+        {
+            qWarning() << "MainWindow: Failed to save chat history via ChatHistoryManager for peer" << peerUuid;
+            // 可以选择在这里通过 updateNetworkStatus 更新UI状态
+        }
+        else
+        {
+            qInfo() << "MainWindow: Chat history saved via ChatHistoryManager for peer" << peerUuid;
+        }
+    }
+    else
+    {
+        qWarning() << "MainWindow::saveChatHistory: ChatHistoryManager is null or no history in memory for peer" << peerUuid;
     }
 }

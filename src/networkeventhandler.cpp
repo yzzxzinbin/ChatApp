@@ -165,6 +165,7 @@ void NetworkEventHandler::handleNewMessageReceived(const QString &peerUuid, cons
                                       .arg(message);
 
     (*chatHistories)[peerUuid].append(receivedMessageHtml);
+    mainWindowPtr->saveChatHistory(peerUuid); // 新增：保存聊天记录
 
     if (contactListWidget->currentItem() == contactItem) {
         messageDisplay->addMessage(receivedMessageHtml);

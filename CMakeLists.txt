@@ -20,8 +20,8 @@ set(PROJECT_SOURCES
         src/contactmanager.h
         src/chatmessagedisplay.h
         src/chatmessagedisplay.cpp
-        src/networkmanager.h       # 添加 networkmanager.h
-        src/networkmanager.cpp     # 添加 networkmanager.cpp
+        src/networkmanager.h
+        src/networkmanager.cpp
         src/addcontactdialog.cpp
         src/addcontactdialog.h
         src/settingsdialog.cpp
@@ -37,7 +37,13 @@ set(PROJECT_SOURCES
         
         src/setupmainstyle.cpp
         src/resources.qrc
+        src/chathistorymanager.cpp # Added chathistorymanager.cpp
+        src/chathistorymanager.h
 )
+
+if(WIN32)
+    set(PROJECT_SOURCES ${PROJECT_SOURCES} src/appicon.rc)
+endif()
 
 if(${QT_VERSION_MAJOR} GREATER_EQUAL 6)
     qt_add_executable(ChatApp

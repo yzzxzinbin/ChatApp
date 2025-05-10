@@ -29,6 +29,7 @@ class SettingsDialog; // Forward declaration
 class PeerInfoWidget; // Forward declaration for our new widget
 class FormattingToolbarHandler; // Forward declaration for the new handler
 class NetworkEventHandler; // Forward declaration for network event handler
+class ChatHistoryManager; // 新增：前向声明 ChatHistoryManager
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
@@ -42,6 +43,7 @@ public:
     QString getLocalUserUuid() const; // 新增
     void updateNetworkStatus(const QString &status); // Make updateNetworkStatus public
     void loadOrCreateUserIdentity(); // 新增方法
+    void saveChatHistory(const QString& peerUuid); // 确保此方法是 public 或 NetworkEventHandler 可以访问
 
 public slots:
     void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port); // 更新签名以包含IP和端口，用于持久化
@@ -100,6 +102,7 @@ private:
     // Data members for chat history and current contact
     QMap<QString, QStringList> chatHistories;
     QString currentOpenChatContactName;
+    ChatHistoryManager* chatHistoryManager; // 新增：聊天记录管理器
 
     // 用户设置
     QString localUserName;
