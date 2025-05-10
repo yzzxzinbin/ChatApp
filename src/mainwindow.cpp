@@ -116,22 +116,34 @@ MainWindow::MainWindow(QWidget *parent)
 
 MainWindow::~MainWindow()
 {
-    // Explicitly stop network manager listening before Qt starts destroying child objects.
-    // This can help ensure network resources are released more gracefully.
+    qDebug() << "MainWindow::~MainWindow() - Starting destruction.";
+    // Explicitly stop network manager listening and discovery.
+    // This should ensure sockets are closed and potentially scheduled for deletion
+    // while the main event loop might still be able to process some events.
     if (networkManager)
     {
-        qDebug() << "MainWindow::~MainWindow(): Explicitly stopping NetworkManager listening.";
-        networkManager->stopListening();
+        qDebug() << "MainWindow::~MainWindow(): Calling networkManager->stopListening().";
+        networkManager->stopListening(); // This closes server, aborts client sockets, and calls deleteLater on them.
+        qDebug() << "MainWindow::~MainWindow(): Calling networkManager->stopUdpDiscovery().";
+        networkManager->stopUdpDiscovery(); // This closes UDP socket.
+
+        // Disconnect all signals from NetworkManager to prevent them from being handled
+        // by MainWindow or NetworkEventHandler slots if NetworkManager emits something
+        // during its own subsequent destruction by Qt's parent-child mechanism.
+        // This is a defensive measure.
+        qDebug() << "MainWindow::~MainWindow(): Disconnecting all signals from networkManager.";
+        disconnect(networkManager, nullptr, nullptr, nullptr);
     }
 
-    // settingsDialog 如果被设置了父对象，会被 Qt 自动管理内存
-    // formattingHandler is a child of MainWindow, so it will be deleted automatically.
-    // peerInfoDisplayWidget is a child of MainWindow, so it will be deleted automatically.
-    // networkEventHandler is a child of MainWindow, so it will be deleted automatically.
-    // chatHistoryManager is a child of MainWindow, so it will be deleted automatically.
+    // contactManager, chatHistoryManager, formattingHandler, networkEventHandler
+    // are children of MainWindow and will be deleted by Qt when MainWindow is destructed.
+    // Their destructors should be well-behaved.
+    // UI elements (contactListWidget, messageDisplay, etc.) are also children and will be deleted by Qt.
 
-    // 确保在程序退出前，当前打开的聊天记录被保存（如果需要）
-    // 实际上，每次消息变动时都保存是更稳妥的做法，这里可能不需要额外操作
+    qDebug() << "MainWindow::~MainWindow() - Destruction finished. Qt will now delete child objects (like NetworkManager, UI elements, etc.).";
+    // MainWindow's QObject destructor will then delete child objects like networkManager,
+    // contactManager, chatHistoryManager, networkEventHandler, formattingHandler,
+    // and all UI widgets that were parented to MainWindow or its child widgets.
 }
 
 void MainWindow::loadOrCreateUserIdentity()
@@ -176,6 +188,7 @@ void MainWindow::loadOrCreateUserIdentity()
     // 更新NetworkManager的设置，以防它们在settingsDialog之外被更改（例如，首次运行）
     if (networkManager)
     {
+        networkManager->setLocalUserDetails(localUserUuid, localUserName); // Moved this line here
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
         networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled); // 确保在这里也调用
@@ -646,6 +659,14 @@ void MainWindow::updateNetworkStatus(const QString &status)
 void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint)
 {
     qDebug() << "MW::handleIncomingConnectionRequest: From" << peerAddress << ":" << peerPort << "PeerUUID:" << peerUuid << "NameHint:" << peerNameHint;
+
+    if (!networkManager)
+    { // Guard against null networkManager
+        qWarning() << "MW::handleIncomingConnectionRequest: networkManager is null, cannot process request.";
+        if (tempSocket)
+            tempSocket->abort(); // Abort the socket if we can't handle it
+        return;
+    }
 
     // 检查是否是已知联系人
     for (int i = 0; i < contactListWidget->count(); ++i)
