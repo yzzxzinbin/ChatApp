@@ -1,4 +1,5 @@
 #include "mainwindow.h"
+#include "logindialog.h" // 新增：包含 LoginDialog
 #include <QApplication>
 #include <QFile>
 #include <QTextStream>
@@ -207,7 +208,30 @@ int main(int argc, char *argv[])
     QSettings settings; 
     qInfo() << "Settings file for this instance will be at:" << settings.fileName();
 
-    qInfo() << "Attempting to construct MainWindow...";
+    // 新增：显示登录对话框
+    LoginDialog loginDialog;
+    loginDialog.setWindowIcon(QIcon(":/icons/app_logo.ico")); // 可选：为登录对话框设置图标
+    if (loginDialog.exec() != QDialog::Accepted) {
+        qInfo() << "Login cancelled or failed. Exiting application.";
+        // 清理操作与应用程序正常退出时相同
+        if (g_logFile) {
+            if (g_logFile->isOpen()) {
+                g_logFile->close();
+            }
+            delete g_logFile;
+            g_logFile = nullptr;
+        }
+        if (g_instanceLockMemory) {
+            if (g_instanceLockMemory->isAttached()) {
+                g_instanceLockMemory->detach();
+            }
+            delete g_instanceLockMemory;
+            g_instanceLockMemory = nullptr;
+        }
+        return 0; // 用户未登录，退出应用
+    }
+
+    qInfo() << "Login successful. Attempting to construct MainWindow...";
     MainWindow w;
     qInfo() << "MainWindow constructed. Attempting to show...";
     w.setWindowIcon(QIcon(":/icons/app_logo.ico")); // 新增：设置窗口图标

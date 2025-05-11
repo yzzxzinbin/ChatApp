@@ -40,6 +40,9 @@ set(PROJECT_SOURCES
         src/resources.qrc
         src/chathistorymanager.cpp # Added chathistorymanager.cpp
         src/chathistorymanager.h
+
+        src/logindialog.cpp
+        src/logindialog.h
 )
 
 if(WIN32)

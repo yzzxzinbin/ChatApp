@@ -8,4 +8,8 @@
     <file alias="offline.svg">../res/offline.svg</file> <!-- 新增离线图标 -->
     <file alias="app_logo.ico">../res/logo.ico</file>
 </qresource>
+<qresource prefix="/res">
+    <file alias="starter.png">../res/starter.png</file>
+
+</qresource>
 </RCC>
