@@ -5,6 +5,7 @@
         "*.dbclient-js": "javascript",
         "new": "cpp",
         "qstackedwidget": "cpp",
-        "filesystem": "cpp"
+        "filesystem": "cpp",
+        "qlabel": "cpp"
     }
 }

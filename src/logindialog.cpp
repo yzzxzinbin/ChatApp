@@ -9,6 +9,7 @@
 #include <QApplication> // Required for qApp
 #include <QGraphicsDropShadowEffect>
 #include <QPainter> // Required for custom painting if needed
+#include <QPainterPath> // 新增：用于创建圆角路径
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent), m_dragging(false)
@@ -19,6 +20,7 @@ LoginDialog::LoginDialog(QWidget *parent)
 
     setupUi();
     applyStyles();
+    this->update();
 
     // The shadow has a blurRadius of 25 and a yOffset of 5.
     // We need to make the dialog larger than the containerWidget to accommodate the shadow.
@@ -26,7 +28,7 @@ LoginDialog::LoginDialog(QWidget *parent)
     // Original containerWidget effective size is 400x490.
     // New Dialog width = 400 (container) + 2 * 20 (margins) = 440
     // New Dialog height = 490 (container) + 2 * 20 (margins) = 530
-    setFixedSize(440, 530); // Adjusted size to include shadow margin
+    setFixedSize(440, 500); // Adjusted size to include shadow margin
 }
 
 LoginDialog::~LoginDialog()
@@ -51,33 +53,13 @@ void LoginDialog::setupUi()
     containerLayout->setContentsMargins(0, 0, 0, 0);
     containerLayout->setSpacing(0);
 
-    // Title bar area for minimize/close buttons
-    titleBarWidget = new QWidget(containerWidget); // Initialize member variable
-    titleBarWidget->setObjectName("titleBarWidget");
-    titleBarWidget->setFixedHeight(30); // Height for the button bar
-    QHBoxLayout *titleBarLayout = new QHBoxLayout(titleBarWidget);
-    titleBarLayout->setContentsMargins(10, 0, 10, 0); // Margins for buttons
-    titleBarLayout->setSpacing(5);
-
-    titleBarLayout->addStretch(); // Push buttons to the right
-
-    minimizeButton = new QPushButton("—", titleBarWidget); // Using text for now
-    minimizeButton->setObjectName("minimizeButton");
-    closeButton = new QPushButton("✕", titleBarWidget); // Using text for now
-    closeButton->setObjectName("closeButton");
-
-    titleBarLayout->addWidget(minimizeButton);
-    titleBarLayout->addWidget(closeButton);
-
-    containerLayout->addWidget(titleBarWidget);
-
     // Top Image Part
     imageLabel = new QLabel(containerWidget);
     imageLabel->setObjectName("imageLabel");
     // Assuming dialog width is 400, image height for 2:1 ratio would be 200
     int imageDisplayHeight = 200;
-    QPixmap starterPixmap(":/res/starter.png");
-    if (starterPixmap.isNull())
+    QPixmap originalStarterPixmap(":/res/starter.png");
+    if (originalStarterPixmap.isNull())
     {
         imageLabel->setText("Image not found (400x200)");
         imageLabel->setAlignment(Qt::AlignCenter);
@@ -85,13 +67,38 @@ void LoginDialog::setupUi()
     }
     else
     {
-        // Scale pixmap to fit width 400, height 200, keeping aspect ratio.
-        // containerWidget's width will be 400 (Dialog width 440 - 2*20 margin).
-        imageLabel->setPixmap(starterPixmap.scaled(400, imageDisplayHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        QPixmap scaledPixmap = originalStarterPixmap.scaled(400, imageDisplayHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap roundedPixmap = createRoundedPixmap(scaledPixmap, 15); // 创建圆角图片
+        imageLabel->setPixmap(roundedPixmap);
     }
     imageLabel->setFixedHeight(imageDisplayHeight);
-    imageLabel->setAlignment(Qt::AlignCenter); // Center the (possibly letterboxed) pixmap
+    imageLabel->setAlignment(Qt::AlignCenter);
     containerLayout->addWidget(imageLabel);
+
+    // Create a widget to act as a container for buttons, overlaying imageLabel
+    QWidget *buttonOverlayWidget = new QWidget(imageLabel); // Parent is imageLabel
+    buttonOverlayWidget->setAttribute(Qt::WA_TranslucentBackground);
+
+    QHBoxLayout *imageButtonsLayout = new QHBoxLayout(buttonOverlayWidget); // Layout for the overlay widget
+    imageButtonsLayout->setContentsMargins(0, 5, 5, 0);
+    imageButtonsLayout->setSpacing(5);
+    imageButtonsLayout->addStretch(); // Push buttons to the right
+
+    minimizeButton = new QPushButton("—", buttonOverlayWidget); // Parent is buttonOverlayWidget
+    minimizeButton->setObjectName("minimizeButton");
+    minimizeButton->setFixedSize(25, 25); // Ensure buttons have a fixed size for consistent look
+
+    closeButton = new QPushButton("✕", buttonOverlayWidget); // Parent is buttonOverlayWidget
+    closeButton->setObjectName("closeButton");
+    closeButton->setFixedSize(25, 25); // Ensure buttons have a fixed size
+
+    imageButtonsLayout->addWidget(minimizeButton);
+    imageButtonsLayout->addWidget(closeButton);
+
+    QVBoxLayout *imageLabelInternalLayout = new QVBoxLayout(imageLabel); // Layout for imageLabel itself
+    imageLabelInternalLayout->setContentsMargins(0, 0, 0, 0);
+    imageLabelInternalLayout->addWidget(buttonOverlayWidget, 0, Qt::AlignTop); // Add overlay, align top
+    imageLabelInternalLayout->addStretch(1);                                   // Push overlay to top if imageLabel is taller than overlay
 
     // Bottom Form Part
     formContainer = new QWidget(containerWidget);
@@ -123,7 +130,7 @@ void LoginDialog::setupUi()
     QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(this); // 'this' or 'containerWidget' as parent for effect
     shadow->setBlurRadius(25);
     shadow->setXOffset(0);
-    shadow->setYOffset(5); // Slight downward offset
+    shadow->setYOffset(5);                  // Slight downward offset
     shadow->setColor(QColor(0, 0, 0, 100)); // Semi-transparent black
     containerWidget->setGraphicsEffect(shadow);
 
@@ -143,14 +150,24 @@ void LoginDialog::applyStyles()
             border-radius: 15px; /* This provides the overall rounded shape */
         }
 
-        #titleBarWidget {
-            background-color: transparent; /* Title bar itself is transparent */
+        /* 
+         * Crucial part for top rounded corners:
+         * imageLabel is the first child of containerWidget in the vertical layout.
+         * Its background must also have top rounded corners to match containerWidget.
+         * NOW TRYING ALL-ROUNDED CORNERS FOR imageLabel.
+         */
+        #imageLabel {
+            background-color: #f0f0f0; /* Fallback/area bg for image */
+            border-radius: 15px; /* All corners rounded */
+            border: none; 
+            padding: 0; 
+            margin: 0; 
         }
 
         QPushButton#minimizeButton, QPushButton#closeButton {
             background-color: transparent;
             border: none;
-            color: #555555; /* Adjust color as needed */
+            color:rgba(242, 240, 240, 0.5); /* Adjust color as needed */
             font-family: "Arial", sans-serif; /* Specify a font that has the symbols */
             font-size: 16px; /* Adjust size for symbols */
             font-weight: bold;
@@ -176,14 +193,6 @@ void LoginDialog::applyStyles()
             color: white;
         }
 
-
-        #imageLabel {
-            background-color: #f0f0f0; /* Fallback/area bg for image */
-            border-top-left-radius: 15px; /* Match containerWidget's top radius */
-            border-top-right-radius: 15px;
-            /* No bottom radius needed here as formContainer is below it */
-        }
-
         #formContainer {
             background-color: #ffffff; 
             border-bottom-left-radius: 15px;  /* Match containerWidget's bottom radius */
@@ -206,7 +215,6 @@ void LoginDialog::applyStyles()
         QLineEdit::placeholder { /* Note: This might not work on all styles/platforms directly in QSS */
             color: #a4b0be;
         }
-
 
         QPushButton#loginButton {
             background-color: #0078d4; /* Primary blue */
@@ -261,35 +269,42 @@ void LoginDialog::mousePressEvent(QMouseEvent *event)
 {
     // Allow dragging only if the click is not on the input fields or buttons
     // A common way is to check if the click is on a specific "draggable" area,
-    // like the titleBarWidget or imageLabel.
+    // like the imageLabel (but not on its child buttons).
     if (event->button() == Qt::LeftButton)
     {
-        // Check if the press is within the titleBarWidget or imageLabel bounds
-        // relative to the LoginDialog.
-        QPoint localPos = event->pos();
-        // Ensure titleBarWidget is not null before accessing, though it should be initialized in setupUi
-        bool onTitleBar = titleBarWidget ? titleBarWidget->geometry().contains(localPos) : false;
-        bool onImageLabel = imageLabel ? imageLabel->geometry().contains(localPos) : false;
+        QPoint localPos = event->pos(); // Event position in LoginDialog's coordinates
 
-        if (onTitleBar || onImageLabel)
-        { // Only allow dragging from these areas
-            // Check if the click was on a button within the title bar
-            if (onTitleBar)
+        // Get the geometry of imageLabel relative to LoginDialog
+        QRect imageLabelRectInDialogCoords;
+        if (imageLabel && imageLabel->parentWidget())
+        {
+            // Map the top-left point of imageLabel (which is in its parent's coords) to LoginDialog's coords
+            QPoint imageLabelTopLeftInDialogCoords = imageLabel->mapTo(this, QPoint(0, 0));
+            imageLabelRectInDialogCoords = QRect(imageLabelTopLeftInDialogCoords, imageLabel->size());
+        }
+
+        bool onImageLabel = imageLabelRectInDialogCoords.contains(localPos);
+
+        if (onImageLabel)
+        {
+            // Check if the click was on a button *within* the imageLabel
+            // mapFromGlobal returns QPointF, childAt expects QPoint.
+            QPoint pointInImageLabelCoords = imageLabel->mapFromGlobal(event->globalPosition()).toPoint();
+            QWidget *child = imageLabel->childAt(pointInImageLabelCoords);
+
+            if (child == minimizeButton || child == closeButton)
             {
-                QWidget *child = childAt(localPos);
-                if (child == minimizeButton || child == closeButton)
-                {
-                    m_dragging = false; // Don't drag if a button was clicked
-                    return;             // Let button handle its event
-                }
+                m_dragging = false; // Don't drag if a button was clicked
+                return;             // Let button handle its event
             }
+
             m_dragging = true;
             m_dragPosition = event->globalPosition().toPoint() - frameGeometry().topLeft();
             event->accept();
         }
         else
         {
-            m_dragging = false; // Don't drag if clicked on form elements
+            m_dragging = false; // Don't drag if clicked on form elements or outside imageLabel
         }
     }
 }
@@ -322,7 +337,7 @@ void LoginDialog::paintEvent(QPaintEvent *event)
     Q_UNUSED(event);
     QPainter painter(this);
     // painter.setRenderHint(QPainter::Antialiasing); // Antialiasing for the fillRect is not usually necessary
-    
+
     // Fill the entire dialog's rectangle with a transparent color.
     // This is crucial for WA_TranslucentBackground to work correctly with custom shapes,
     // ensuring that areas not covered by child widgets (like containerWidget) are truly transparent.
@@ -331,4 +346,32 @@ void LoginDialog::paintEvent(QPaintEvent *event)
     // The actual visible content (containerWidget with its own background, border-radius, and shadow)
     // will be drawn by Qt's rendering system on top of this transparent background.
     // No need to call QDialog::paintEvent(event) if we are fully overriding.
+}
+
+// 新增：实现创建圆角 QPixmap 的辅助方法
+QPixmap LoginDialog::createRoundedPixmap(const QPixmap &source, int radius)
+{
+    if (source.isNull()) {
+        return QPixmap();
+    }
+
+    // 创建一个与源图片大小相同，且背景透明的新 QPixmap
+    QPixmap result(source.size());
+    result.fill(Qt::transparent);
+
+    QPainter painter(&result);
+    painter.setRenderHint(QPainter::Antialiasing, true); // 抗锯齿
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true); // 平滑缩放（如果源是缩放过的）
+
+    // 创建一个圆角矩形路径
+    QPainterPath path;
+    path.addRoundedRect(result.rect(), radius, radius);
+
+    // 设置剪切路径
+    painter.setClipPath(path);
+
+    // 将源图片绘制到目标 QPixmap 上（在剪切路径内）
+    painter.drawPixmap(0, 0, source);
+
+    return result;
 }

@@ -36,6 +36,7 @@ private slots:
 private:
     void setupUi();
     void applyStyles();
+    QPixmap createRoundedPixmap(const QPixmap &source, int radius); // 新增辅助方法
 
     QLabel *imageLabel;
     QLineEdit *usernameEdit;
@@ -48,7 +49,6 @@ private:
 
     QVBoxLayout *mainLayout;
     QWidget *formContainer;
-    QWidget *titleBarWidget; // Declare titleBarWidget as a member
 
     bool m_dragging;
     QPoint m_dragPosition;
