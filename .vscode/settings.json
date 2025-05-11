@@ -6,6 +6,8 @@
         "new": "cpp",
         "qstackedwidget": "cpp",
         "filesystem": "cpp",
-        "qlabel": "cpp"
+        "qlabel": "cpp",
+        "qgraphicsdropshadoweffect": "cpp",
+        "qpainter": "cpp"
     }
 }

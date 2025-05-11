@@ -43,6 +43,7 @@ set(PROJECT_SOURCES
 
         src/logindialog.cpp
         src/logindialog.h
+        src/logindialogstyle.cpp
 )
 
 if(WIN32)

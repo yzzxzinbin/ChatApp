@@ -4,8 +4,10 @@
 #include <QDialog>
 #include <QPoint>
 #include <QCheckBox> 
-#include <QPropertyAnimation> // 新增
-#include <QParallelAnimationGroup> // 新增
+#include <QPropertyAnimation> 
+#include <QParallelAnimationGroup> 
+#include <QColor> // 新增
+#include <QShowEvent> // 新增
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -13,7 +15,7 @@ class QLineEdit;
 class QPushButton;
 class QVBoxLayout;
 class QMouseEvent;
-// QPropertyAnimation 和 QParallelAnimationGroup 已包含
+class QVariantAnimation; // Forward declare
 QT_END_NAMESPACE
 
 class LoginDialog : public QDialog
@@ -29,14 +31,13 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
     void paintEvent(QPaintEvent *event) override; 
-    bool eventFilter(QObject *watched, QEvent *event) override; // 新增
+    bool eventFilter(QObject *watched, QEvent *event) override; 
+    void showEvent(QShowEvent *event) override; // 新增
 
 private slots:
     void onLoginClicked();
     void onMinimizeClicked(); 
     void onCloseClicked();    
-    // void onForgotPasswordClicked(); 
-    // void onSignUpClicked();       
 
 private:
     void setupUi();
@@ -64,7 +65,15 @@ private:
     QPropertyAnimation *loginMaxSizeAnimation;
     QPropertyAnimation *signUpMinSizeAnimation;
     QPropertyAnimation *signUpMaxSizeAnimation;
-    QParallelAnimationGroup *buttonWidthAnimationGroup; // 单个动画组
+    QParallelAnimationGroup *buttonWidthAnimationGroup; 
+
+    // Forgot Password 动画及相关成员
+    QColor forgotPasswordNormalColor;      
+    QColor forgotPasswordHoverColor;       
+    QColor underlineColor;                 
+    QWidget* forgotPasswordUnderlineContainer; 
+    QWidget* forgotPasswordUnderline;          
+    QPropertyAnimation* underlineAnimation;    
 
     int initialLoginWidth;
     int initialSignUpWidth;

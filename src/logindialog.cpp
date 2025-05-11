@@ -6,32 +6,39 @@
 #include <QHBoxLayout>
 #include <QPixmap>
 #include <QMouseEvent>
-#include <QApplication> // Required for qApp
+#include <QApplication> 
 #include <QGraphicsDropShadowEffect>
-#include <QPainter> // Required for custom painting if needed
-#include <QPainterPath> // 新增：用于创建圆角路径
-#include <QEvent> // 新增
-#include <QIcon> // 新增：用于按钮图标
-#include <QSizePolicy> // 新增：用于 QSizePolicy
-#include <QWidget> // 新增：用于 QWidget
+#include <QPainter> 
+#include <QPainterPath> 
+#include <QEvent> 
+#include <QIcon> 
+#include <QSizePolicy> 
+#include <QWidget> 
+#include <QPalette> 
+#include <QVariantAnimation> 
+#include <QTextDocument>     
+#include <QRegularExpression> 
 
 LoginDialog::LoginDialog(QWidget *parent)
-    : QDialog(parent), m_dragging(false)
+    : QDialog(parent), m_dragging(false), 
+      forgotPasswordUnderlineContainer(nullptr), 
+      forgotPasswordUnderline(nullptr),
+      underlineAnimation(nullptr)
 {
+    // 首先初始化颜色成员变量
+    forgotPasswordNormalColor = QColor(Qt::darkGray).lighter(130); 
+    forgotPasswordHoverColor = Qt::darkGray;                     
+    underlineColor = Qt::darkGray; 
+
     setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground, true);
     setAttribute(Qt::WA_DeleteOnClose);
 
-    setupUi();
+    setupUi(); // 然后调用 setupUi
     applyStyles();
     this->update();
 
-    // The shadow has a blurRadius of 25 and a yOffset of 5.
-    // We need to make the dialog larger than the containerWidget to accommodate the shadow.
-    // Original containerWidget effective size is 400x490.
-    // New Dialog width = 400 (container) + 2 * 20 (margins) = 440
-    // New Dialog height = 490 (container) + 2 * 20 (margins) + ~40 (for new row) = 570
-    setFixedSize(440, 540); // 增加了高度以容纳新行
+    setFixedSize(440, 500);
 }
 
 LoginDialog::~LoginDialog()
@@ -41,25 +48,19 @@ LoginDialog::~LoginDialog()
 void LoginDialog::setupUi()
 {
     mainLayout = new QVBoxLayout(this);
-    // Set margins for the mainLayout. This creates a transparent border around containerWidget
-    // where the shadow can be rendered.
-    // A margin of 20px should be mostly sufficient for a blurRadius of 25px.
     int shadowMargin = 20;
     mainLayout->setContentsMargins(shadowMargin, shadowMargin, shadowMargin, shadowMargin);
     mainLayout->setSpacing(0);
 
     QWidget *containerWidget = new QWidget(this);
     containerWidget->setObjectName("containerWidget");
-    // containerWidget will now effectively be 400x490 due to the margins in mainLayout.
 
     QVBoxLayout *containerLayout = new QVBoxLayout(containerWidget);
     containerLayout->setContentsMargins(0, 0, 0, 0);
     containerLayout->setSpacing(0);
 
-    // Top Image Part
     imageLabel = new QLabel(containerWidget);
     imageLabel->setObjectName("imageLabel");
-    // Assuming dialog width is 400, image height for 2:1 ratio would be 200
     int imageDisplayHeight = 200;
     QPixmap originalStarterPixmap(":/res/starter.png");
     if (originalStarterPixmap.isNull())
@@ -71,44 +72,42 @@ void LoginDialog::setupUi()
     else
     {
         QPixmap scaledPixmap = originalStarterPixmap.scaled(400, imageDisplayHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        QPixmap roundedPixmap = createRoundedPixmap(scaledPixmap, 15); // 创建圆角图片
+        QPixmap roundedPixmap = createRoundedPixmap(scaledPixmap, 15);
         imageLabel->setPixmap(roundedPixmap);
     }
     imageLabel->setFixedHeight(imageDisplayHeight);
     imageLabel->setAlignment(Qt::AlignCenter);
     containerLayout->addWidget(imageLabel);
 
-    // Create a widget to act as a container for buttons, overlaying imageLabel
-    QWidget *buttonOverlayWidget = new QWidget(imageLabel); // Parent is imageLabel
+    QWidget *buttonOverlayWidget = new QWidget(imageLabel);
     buttonOverlayWidget->setAttribute(Qt::WA_TranslucentBackground);
 
-    QHBoxLayout *imageButtonsLayout = new QHBoxLayout(buttonOverlayWidget); // Layout for the overlay widget
+    QHBoxLayout *imageButtonsLayout = new QHBoxLayout(buttonOverlayWidget);
     imageButtonsLayout->setContentsMargins(0, 5, 5, 0);
     imageButtonsLayout->setSpacing(5);
-    imageButtonsLayout->addStretch(); // Push buttons to the right
+    imageButtonsLayout->addStretch();
 
-    minimizeButton = new QPushButton("—", buttonOverlayWidget); // Parent is buttonOverlayWidget
+    minimizeButton = new QPushButton("—", buttonOverlayWidget);
     minimizeButton->setObjectName("minimizeButton");
-    minimizeButton->setFixedSize(25, 25); // Ensure buttons have a fixed size for consistent look
+    minimizeButton->setFixedSize(25, 25);
 
-    closeButton = new QPushButton("✕", buttonOverlayWidget); // Parent is buttonOverlayWidget
+    closeButton = new QPushButton("✕", buttonOverlayWidget);
     closeButton->setObjectName("closeButton");
-    closeButton->setFixedSize(25, 25); // Ensure buttons have a fixed size
+    closeButton->setFixedSize(25, 25);
 
     imageButtonsLayout->addWidget(minimizeButton);
     imageButtonsLayout->addWidget(closeButton);
 
-    QVBoxLayout *imageLabelInternalLayout = new QVBoxLayout(imageLabel); // Layout for imageLabel itself
+    QVBoxLayout *imageLabelInternalLayout = new QVBoxLayout(imageLabel);
     imageLabelInternalLayout->setContentsMargins(0, 0, 0, 0);
-    imageLabelInternalLayout->addWidget(buttonOverlayWidget, 0, Qt::AlignTop); // Add overlay, align top
-    imageLabelInternalLayout->addStretch(1);                                   // Push overlay to top if imageLabel is taller than overlay
+    imageLabelInternalLayout->addWidget(buttonOverlayWidget, 0, Qt::AlignTop);
+    imageLabelInternalLayout->addStretch(1);
 
-    // Bottom Form Part
     formContainer = new QWidget(containerWidget);
     formContainer->setObjectName("formContainer");
     QVBoxLayout *formLayout = new QVBoxLayout(formContainer);
-    formLayout->setContentsMargins(30, 25, 30, 30); // Adjusted padding
-    formLayout->setSpacing(18);                     // Adjusted spacing
+    formLayout->setContentsMargins(30, 25, 30, 20);
+    formLayout->setSpacing(18);
 
     usernameEdit = new QLineEdit(formContainer);
     usernameEdit->setObjectName("usernameEdit");
@@ -119,97 +118,107 @@ void LoginDialog::setupUi()
     passwordEdit->setPlaceholderText(tr("Password"));
     passwordEdit->setEchoMode(QLineEdit::Password);
 
-    // 新增：记住密码和忘记密码行
     QHBoxLayout *optionsLayout = new QHBoxLayout();
     rememberMeCheckBox = new QCheckBox(tr("Remember me"), formContainer);
     rememberMeCheckBox->setObjectName("rememberMeCheckBox");
-    
-    forgotPasswordLabel = new QLabel(tr("<a href=\"#\">Forgot password?</a>"), formContainer);
+
+    QWidget *forgotPasswordInteractiveWidget = new QWidget(formContainer);
+    QVBoxLayout *fpVerticalLayout = new QVBoxLayout(forgotPasswordInteractiveWidget);
+    fpVerticalLayout->setContentsMargins(0, 0, 0, 0);
+    fpVerticalLayout->setSpacing(0);
+
+    forgotPasswordLabel = new QLabel(tr("Forgot password?"), forgotPasswordInteractiveWidget); 
     forgotPasswordLabel->setObjectName("forgotPasswordLabel");
-    forgotPasswordLabel->setTextFormat(Qt::RichText);
-    forgotPasswordLabel->setTextInteractionFlags(Qt::TextBrowserInteraction); // 使其可点击
-    forgotPasswordLabel->setOpenExternalLinks(false); // 在应用内处理点击
+    forgotPasswordLabel->setCursor(Qt::PointingHandCursor); // 保持手形光标以指示可交互
+    forgotPasswordLabel->installEventFilter(this);
+
+    QPalette fpPalette = forgotPasswordLabel->palette();
+    fpPalette.setColor(QPalette::WindowText, forgotPasswordNormalColor); // 设置初始文本颜色
+    forgotPasswordLabel->setPalette(fpPalette);
+
+    forgotPasswordUnderlineContainer = new QWidget(forgotPasswordInteractiveWidget);
+    forgotPasswordUnderlineContainer->setFixedHeight(2);
+
+    forgotPasswordUnderline = new QWidget(forgotPasswordUnderlineContainer);
+    forgotPasswordUnderline->setStyleSheet(QString("background-color: %1;").arg(underlineColor.name()));
+    
+    fpVerticalLayout->addWidget(forgotPasswordLabel);
+    fpVerticalLayout->addWidget(forgotPasswordUnderlineContainer);
+    forgotPasswordInteractiveWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
     optionsLayout->addWidget(rememberMeCheckBox);
     optionsLayout->addStretch();
-    optionsLayout->addWidget(forgotPasswordLabel);
+    optionsLayout->addWidget(forgotPasswordInteractiveWidget);
 
-    // 新增：登录和注册按钮行
-    QWidget *actionButtonsContainer = new QWidget(formContainer); 
-    QHBoxLayout *actionButtonsLayout = new QHBoxLayout(actionButtonsContainer); 
-    actionButtonsLayout->setContentsMargins(0, 0, 0, 0); 
-    actionButtonsLayout->setSpacing(15); // 修改：使用布局的 spacing 属性
+    QWidget *actionButtonsContainer = new QWidget(formContainer);
+    QHBoxLayout *actionButtonsLayout = new QHBoxLayout(actionButtonsContainer);
+    actionButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    actionButtonsLayout->setSpacing(15);
 
-    loginButton = new QPushButton(actionButtonsContainer); 
+    loginButton = new QPushButton(actionButtonsContainer);
     loginButton->setObjectName("loginButton");
     loginButton->setFixedHeight(45);
-    loginButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); // 新增：明确尺寸策略
+    loginButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-    signUpButton = new QPushButton(actionButtonsContainer); 
+    signUpButton = new QPushButton(actionButtonsContainer);
     signUpButton->setObjectName("signUpButton");
     signUpButton->setFixedHeight(45);
-    signUpButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); // 新增：明确尺寸策略
+    signUpButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
-    int totalWidthForButtonsContainer = 340; 
+    int totalWidthForButtonsContainer = 340;
     int spacingBetweenButtons = 15;
     int totalWidthForButtonsOnly = totalWidthForButtonsContainer - spacingBetweenButtons;
 
-    // 初始状态：登录82%，注册18%
-    initialLoginWidth = qRound(totalWidthForButtonsOnly * 0.82); // 从 0.75 改为 0.82
-    initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth; 
+    initialLoginWidth = qRound(totalWidthForButtonsOnly * 0.82);
+    initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
 
-    // 悬停在注册按钮上时：登录18%，注册82%
-    targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82); // 从 0.75 改为 0.82
-    targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover; 
+    targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
+    targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
 
-    // 确保总和严格等于 totalWidthForButtonsOnly
-    // 如果因为 qRound 导致偏差，调整其中一个以匹配
     if (initialLoginWidth + initialSignUpWidth != totalWidthForButtonsOnly) {
         initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
     }
     if (targetLoginWidthOnSignUpHover + targetSignUpWidthOnSignUpHover != totalWidthForButtonsOnly) {
-        // 确保 signUpButton 获得目标宽度，loginButton 填充剩余
-        targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82); // 重新计算以确保 signUp 优先
+        targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
         targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
     }
 
     loginButton->setFixedWidth(initialLoginWidth);
-    loginButton->setText(tr("Login")); 
-    loginButton->setIcon(QIcon());    
+    loginButton->setText(tr("Login"));
+    loginButton->setIcon(QIcon());
 
     signUpButton->setFixedWidth(initialSignUpWidth);
-    signUpButton->setText(""); 
-    signUpButton->setIcon(QIcon(":/icons/register.svg")); 
-    signUpButton->setIconSize(QSize(24, 24)); 
+    signUpButton->setText("");
+    signUpButton->setIcon(QIcon(":/icons/register.svg"));
+    signUpButton->setIconSize(QSize(24, 24));
 
     actionButtonsLayout->addWidget(loginButton);
     actionButtonsLayout->addWidget(signUpButton);
-    
-    actionButtonsLayout->setStretchFactor(loginButton, 0); // 按钮不拉伸
-    actionButtonsLayout->setStretchFactor(signUpButton, 0); // 按钮不拉伸
 
-    actionButtonsContainer->setFixedWidth(totalWidthForButtonsContainer); 
+    actionButtonsLayout->setStretchFactor(loginButton, 0);
+    actionButtonsLayout->setStretchFactor(signUpButton, 0);
+
+    actionButtonsContainer->setFixedWidth(totalWidthForButtonsContainer);
 
     formLayout->addWidget(usernameEdit);
     formLayout->addWidget(passwordEdit);
-    formLayout->addLayout(optionsLayout); 
-    formLayout->addSpacing(10);           
-    formLayout->addWidget(actionButtonsContainer); // 5. 将容器QWidget添加到formLayout
+    formLayout->addLayout(optionsLayout);
+    formLayout->addSpacing(4);
+    formLayout->addWidget(actionButtonsContainer);
     formLayout->addStretch();
 
     containerLayout->addWidget(formContainer, 1);
 
-    QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(this); // 'this' or 'containerWidget' as parent for effect
+    QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(this);
     shadow->setBlurRadius(25);
     shadow->setXOffset(0);
-    shadow->setYOffset(5);                  // Slight downward offset
-    shadow->setColor(QColor(0, 0, 0, 100)); // Semi-transparent black
+    shadow->setYOffset(5);
+    shadow->setColor(QColor(0, 0, 0, 100));
     containerWidget->setGraphicsEffect(shadow);
 
     mainLayout->addWidget(containerWidget);
     setLayout(mainLayout);
 
-    // 初始化动画
     buttonWidthAnimationGroup = new QParallelAnimationGroup(this);
 
     loginMinSizeAnimation = new QPropertyAnimation(loginButton, "minimumWidth", this);
@@ -232,173 +241,17 @@ void LoginDialog::setupUi()
     signUpMaxSizeAnimation->setEasingCurve(QEasingCurve::InOutCubic);
     buttonWidthAnimationGroup->addAnimation(signUpMaxSizeAnimation);
 
-    signUpButton->installEventFilter(this); // 在 signUpButton 上安装事件过滤器
+    signUpButton->installEventFilter(this);
 
     connect(loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
     connect(minimizeButton, &QPushButton::clicked, this, &LoginDialog::onMinimizeClicked);
     connect(closeButton, &QPushButton::clicked, this, &LoginDialog::onCloseClicked);
 }
 
-void LoginDialog::applyStyles()
-{
-    this->setStyleSheet(R"(
-        #containerWidget {
-            background-color: #ffffff; 
-            border-radius: 15px; /* This provides the overall rounded shape */
-        }
-
-        /* 
-         * Crucial part for top rounded corners:
-         * imageLabel is the first child of containerWidget in the vertical layout.
-         * Its background must also have top rounded corners to match containerWidget.
-         * NOW TRYING ALL-ROUNDED CORNERS FOR imageLabel.
-         */
-        #imageLabel {
-            background-color: #f0f0f0; /* Fallback/area bg for image */
-            border-radius: 15px; /* All corners rounded */
-            border: none; 
-            padding: 0; 
-            margin: 0; 
-        }
-
-        QCheckBox#rememberMeCheckBox {
-            color: #555555; /* 与标签文本颜色一致 */
-            font-size: 13px;
-        }
-        QCheckBox#rememberMeCheckBox::indicator {
-            width: 16px;
-            height: 16px;
-            border: 1px solid #dcdde1;
-            border-radius: 4px;
-            background-color: #f0f0f2;
-        }
-        QCheckBox#rememberMeCheckBox::indicator:checked {
-            background-color: #0078d4; /* 选中时颜色与主按钮一致 */
-            image: url(:/icons/check_mark.svg); /* 可选：自定义勾选图标 */
-        }
-        QCheckBox#rememberMeCheckBox::indicator:hover {
-            border: 1px solid #0078d4;
-        }
-
-        QLabel#forgotPasswordLabel {
-            color: #0078d4; /* 链接颜色 */
-            font-size: 13px;
-            text-decoration: none; /* 默认无下划线 */
-        }
-        QLabel#forgotPasswordLabel:hover {
-            text-decoration: underline; /* 悬停时有下划线 */
-        }
-
-        QPushButton#minimizeButton, QPushButton#closeButton {
-            background-color: transparent;
-            border: none;
-            color:rgba(242, 240, 240, 0.5); /* Adjust color as needed */
-            font-family: "Arial", sans-serif; /* Specify a font that has the symbols */
-            font-size: 16px; /* Adjust size for symbols */
-            font-weight: bold;
-            min-width: 25px;
-            max-width: 25px;
-            min-height: 25px;
-            max-height: 25px;
-            border-radius: 4px; /* Optional: slight rounding for buttons themselves */
-        }
-        QPushButton#minimizeButton:hover, QPushButton#closeButton:hover {
-            background-color: #e0e0e0; /* Light grey hover */
-            color: #000000;
-        }
-        QPushButton#closeButton:hover {
-            background-color: #ff6b6b; /* Reddish hover for close */
-            color: white;
-        }
-        QPushButton#minimizeButton:pressed, QPushButton#closeButton:pressed {
-            background-color: #c0c0c0; /* Darker grey pressed */
-        }
-         QPushButton#closeButton:pressed {
-            background-color: #ee3535; /* Darker Reddish pressed for close */
-            color: white;
-        }
-
-        #formContainer {
-            background-color: #ffffff; 
-            border-bottom-left-radius: 15px;  /* Match containerWidget's bottom radius */
-            border-bottom-right-radius: 15px; 
-            /* No top radius needed here as imageLabel is above it */
-        }
-
-        QLineEdit {
-            background-color: #f0f0f2; /* Light grey background */
-            border: 1px solid #dcdde1; /* Light border */
-            border-radius: 8px;
-            padding: 12px 15px;
-            color: #2f3542; /* Dark grey text */
-            font-size: 14px;
-        }
-        QLineEdit:focus {
-            border: 1px solid #0078d4; /* Blue border on focus - similar to other parts of app */
-            background-color: #ffffff;
-        }
-        QLineEdit::placeholder { /* Note: This might not work on all styles/platforms directly in QSS */
-            color: #a4b0be;
-        }
-
-        QPushButton#loginButton {
-            background-color: #0078d4; /* Primary blue */
-            color: white;
-            border: none;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            padding-left: 10px; /* 为图标腾出空间（如果适用） */
-            padding-right: 10px;
-        }
-        QPushButton#loginButton:hover {
-            background-color: #005a9e; /* Darker blue */
-        }
-        QPushButton#loginButton:pressed {
-            background-color: #004578; /* Even darker blue */
-        }
-
-        /* 注册按钮样式 - 次要按钮风格 */
-        QPushButton#signUpButton {
-            background-color: #f0f0f2; /* Light grey background, similar to QLineEdit */
-            color: #2f3542; /* Dark grey text */
-            border: 1px solid #dcdde1; /* Light border */
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: bold;
-            padding-left: 10px; /* 为图标腾出空间（如果适用） */
-            padding-right: 10px;
-        }
-        QPushButton#signUpButton:hover {
-            background-color: #e0e0e0; 
-            border-color: #c0c0c0;
-        }
-        QPushButton#signUpButton:pressed {
-            background-color: #d0d0d0;
-        }
-    )");
-
-    // For placeholder text, QPalette is more reliable if QSS doesn't work
-    QPalette palette = usernameEdit->palette();
-    palette.setColor(QPalette::PlaceholderText, QColor("#a4b0be"));
-    usernameEdit->setPalette(palette);
-    passwordEdit->setPalette(palette);
-}
 
 void LoginDialog::onLoginClicked()
 {
-    // Login logic will go here
-    // For now, just accept the dialog to simulate a successful login
-    // In a real app, you'd validate credentials
-    // QString username = usernameEdit->text();
-    // QString password = passwordEdit->text();
-    // if (username == "admin" && password == "password") { // Dummy check
-    //     accept();
-    // } else {
-    //     // Show error message
-    //     QMessageBox::warning(this, "Login Failed", "Invalid username or password.");
-    // }
-    accept(); // Temporarily accept to proceed
+    accept();
 }
 
 void LoginDialog::onMinimizeClicked()
@@ -408,23 +261,18 @@ void LoginDialog::onMinimizeClicked()
 
 void LoginDialog::onCloseClicked()
 {
-    this->reject(); // Or close(), reject() is typical for dialogs to indicate cancellation
+    this->reject();
 }
 
 void LoginDialog::mousePressEvent(QMouseEvent *event)
 {
-    // Allow dragging only if the click is not on the input fields or buttons
-    // A common way is to check if the click is on a specific "draggable" area,
-    // like the imageLabel (but not on its child buttons).
     if (event->button() == Qt::LeftButton)
     {
-        QPoint localPos = event->pos(); // Event position in LoginDialog's coordinates
+        QPoint localPos = event->pos();
 
-        // Get the geometry of imageLabel relative to LoginDialog
         QRect imageLabelRectInDialogCoords;
         if (imageLabel && imageLabel->parentWidget())
         {
-            // Map the top-left point of imageLabel (which is in its parent's coords) to LoginDialog's coords
             QPoint imageLabelTopLeftInDialogCoords = imageLabel->mapTo(this, QPoint(0, 0));
             imageLabelRectInDialogCoords = QRect(imageLabelTopLeftInDialogCoords, imageLabel->size());
         }
@@ -433,15 +281,13 @@ void LoginDialog::mousePressEvent(QMouseEvent *event)
 
         if (onImageLabel)
         {
-            // Check if the click was on a button *within* the imageLabel
-            // mapFromGlobal returns QPointF, childAt expects QPoint.
             QPoint pointInImageLabelCoords = imageLabel->mapFromGlobal(event->globalPosition()).toPoint();
             QWidget *child = imageLabel->childAt(pointInImageLabelCoords);
 
             if (child == minimizeButton || child == closeButton)
             {
-                m_dragging = false; // Don't drag if a button was clicked
-                return;             // Let button handle its event
+                m_dragging = false;
+                return;
             }
 
             m_dragging = true;
@@ -450,7 +296,7 @@ void LoginDialog::mousePressEvent(QMouseEvent *event)
         }
         else
         {
-            m_dragging = false; // Don't drag if clicked on form elements or outside imageLabel
+            m_dragging = false;
         }
     }
 }
@@ -473,62 +319,66 @@ void LoginDialog::mouseReleaseEvent(QMouseEvent *event)
     }
 }
 
-// If WA_TranslucentBackground is true, and you need perfect rounded corners
-// without relying solely on stylesheet border-radius for the top-level widget,
-// you might need a paintEvent. However, for a simple dialog shape like this,
-// having a containerWidget with border-radius and shadow, inside a transparent dialog,
-// is often sufficient.
 void LoginDialog::paintEvent(QPaintEvent *event)
 {
     Q_UNUSED(event);
     QPainter painter(this);
-    // painter.setRenderHint(QPainter::Antialiasing); // Antialiasing for the fillRect is not usually necessary
-
-    // Fill the entire dialog's rectangle with a transparent color.
-    // This is crucial for WA_TranslucentBackground to work correctly with custom shapes,
-    // ensuring that areas not covered by child widgets (like containerWidget) are truly transparent.
     painter.fillRect(rect(), Qt::transparent);
-
-    // The actual visible content (containerWidget with its own background, border-radius, and shadow)
-    // will be drawn by Qt's rendering system on top of this transparent background.
-    // No need to call QDialog::paintEvent(event) if we are fully overriding.
 }
 
-// 新增：实现创建圆角 QPixmap 的辅助方法
 QPixmap LoginDialog::createRoundedPixmap(const QPixmap &source, int radius)
 {
     if (source.isNull()) {
         return QPixmap();
     }
 
-    // 创建一个与源图片大小相同，且背景透明的新 QPixmap
     QPixmap result(source.size());
     result.fill(Qt::transparent);
 
     QPainter painter(&result);
-    painter.setRenderHint(QPainter::Antialiasing, true); // 抗锯齿
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true); // 平滑缩放（如果源是缩放过的）
+    painter.setRenderHint(QPainter::Antialiasing, true);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
 
-    // 创建一个圆角矩形路径
     QPainterPath path;
     path.addRoundedRect(result.rect(), radius, radius);
 
-    // 设置剪切路径
     painter.setClipPath(path);
-
-    // 将源图片绘制到目标 QPixmap 上（在剪切路径内）
     painter.drawPixmap(0, 0, source);
 
     return result;
+}
+
+void LoginDialog::showEvent(QShowEvent *event)
+{
+    QDialog::showEvent(event); 
+
+    if (forgotPasswordLabel && forgotPasswordUnderlineContainer && forgotPasswordUnderline && !underlineAnimation) {
+        QString plainText = forgotPasswordLabel->text(); // 直接获取纯文本
+        
+        QFontMetrics fm = forgotPasswordLabel->fontMetrics();
+        int textWidth = fm.horizontalAdvance(plainText);
+
+        if (textWidth <= 0) {
+            textWidth = 100;
+        }
+
+        forgotPasswordUnderlineContainer->setFixedWidth(textWidth);
+        forgotPasswordUnderline->setFixedSize(textWidth, forgotPasswordUnderlineContainer->height());
+        // 确保初始位置在左侧外部
+        forgotPasswordUnderline->move(-textWidth, 0); 
+
+        underlineAnimation = new QPropertyAnimation(forgotPasswordUnderline, "pos", this);
+        underlineAnimation->setDuration(250); 
+        underlineAnimation->setEasingCurve(QEasingCurve::InOutQuad); 
+    }
 }
 
 bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
 {
     if (watched == signUpButton) {
         if (event->type() == QEvent::Enter) {
-            buttonWidthAnimationGroup->stop(); 
+            buttonWidthAnimationGroup->stop();
 
-            // 获取当前的实际宽度作为动画起点
             int currentLoginWidth = loginButton->width();
             int currentSignUpWidth = signUpButton->width();
 
@@ -547,14 +397,13 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
 
             loginButton->setText("");
             loginButton->setIcon(QIcon(":/icons/login.svg"));
-            loginButton->setIconSize(QSize(24, 24)); 
+            loginButton->setIconSize(QSize(24, 24));
 
             buttonWidthAnimationGroup->start();
             return true; 
         } else if (event->type() == QEvent::Leave) {
-            buttonWidthAnimationGroup->stop(); 
+            buttonWidthAnimationGroup->stop();
 
-            // 获取当前的实际宽度作为动画起点
             int currentLoginWidth = loginButton->width();
             int currentSignUpWidth = signUpButton->width();
 
@@ -577,6 +426,67 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
             
             buttonWidthAnimationGroup->start();
             return true; 
+        }
+    } else if (watched == forgotPasswordLabel) {
+        if (!underlineAnimation || !forgotPasswordUnderline || !forgotPasswordUnderlineContainer) { // 添加了对 container 的检查
+            return QDialog::eventFilter(watched, event);
+        }
+
+        // 每次都从 forgotPasswordUnderlineContainer 获取宽度，以防万一标签文本动态改变（虽然本例中不常见）
+        int textWidth = forgotPasswordUnderlineContainer->width(); 
+        if (textWidth <= 0) textWidth = 100; // Absolute fallback
+
+        if (event->type() == QEvent::Enter) {
+            // 文本颜色动画
+            QVariantAnimation *textColorAnim = new QVariantAnimation(this);
+            textColorAnim->setDuration(250); // 动画时长与下划线一致
+            textColorAnim->setEasingCurve(QEasingCurve::InOutQuad); // 缓动曲线与下划线一致
+            // 使用 palette 获取当前颜色作为起始值，而不是直接用 forgotPasswordNormalColor
+            // 因为可能存在动画中途再次触发 enter 的情况
+            QPalette currentPalette = forgotPasswordLabel->palette();
+            textColorAnim->setStartValue(currentPalette.color(QPalette::WindowText));
+            textColorAnim->setEndValue(forgotPasswordHoverColor);
+            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+                QPalette palette = forgotPasswordLabel->palette();
+                palette.setColor(QPalette::WindowText, value.value<QColor>());
+                forgotPasswordLabel->setPalette(palette);
+            });
+            textColorAnim->start(QAbstractAnimation::DeleteWhenStopped);
+
+            // 下划线动画：滑入
+            underlineAnimation->stop(); // 停止当前动画
+            // 确保滑入动画总是从左侧外部开始
+            forgotPasswordUnderline->move(-textWidth, 0); // 立即重置到左侧外部
+            underlineAnimation->setStartValue(QPoint(-textWidth, 0)); // 起始位置
+            underlineAnimation->setEndValue(QPoint(0, 0));           // 目标位置
+            underlineAnimation->setDirection(QAbstractAnimation::Forward); 
+            underlineAnimation->start();
+            return true;
+
+        } else if (event->type() == QEvent::Leave) {
+            // 文本颜色动画
+            QVariantAnimation *textColorAnim = new QVariantAnimation(this);
+            textColorAnim->setDuration(250);
+            textColorAnim->setEasingCurve(QEasingCurve::InOutQuad);
+            // 使用 palette 获取当前颜色作为起始值
+            QPalette currentPalette = forgotPasswordLabel->palette();
+            textColorAnim->setStartValue(currentPalette.color(QPalette::WindowText));
+            textColorAnim->setEndValue(forgotPasswordNormalColor);
+            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
+                QPalette palette = forgotPasswordLabel->palette();
+                palette.setColor(QPalette::WindowText, value.value<QColor>());
+                forgotPasswordLabel->setPalette(palette);
+            });
+            textColorAnim->start(QAbstractAnimation::DeleteWhenStopped);
+
+            // 下划线动画：滑出 (向右)
+            underlineAnimation->stop(); // 停止当前动画
+            // 滑出动画从当前位置（应该是0,0）开始
+            underlineAnimation->setStartValue(forgotPasswordUnderline->pos()); 
+            underlineAnimation->setEndValue(QPoint(textWidth, 0)); // 目标位置：滑出到右侧
+            underlineAnimation->setDirection(QAbstractAnimation::Forward); 
+            underlineAnimation->start();
+            return true;
         }
     }
     return QDialog::eventFilter(watched, event);
