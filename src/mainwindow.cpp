@@ -770,7 +770,7 @@ void MainWindow::loadContactsAndAttemptReconnection()
         QString uuid = settings.value("uuid").toString();
         QString name = settings.value("name").toString();
         QString ip = settings.value("ip").toString();
-        quint16 port = settings.value("port").toUInt(); // 读取保存的端口
+        quint16 savedContactPort = settings.value("port").toUInt(); // 这是联系人保存的端口
 
         if (uuid.isEmpty() || name.isEmpty())
             continue;
@@ -782,7 +782,7 @@ void MainWindow::loadContactsAndAttemptReconnection()
             {
                 contactListWidget->item(j)->setText(name); // 更新名称
                 contactListWidget->item(j)->setData(Qt::UserRole + 1, ip);
-                contactListWidget->item(j)->setData(Qt::UserRole + 2, port); // 更新端口
+                contactListWidget->item(j)->setData(Qt::UserRole + 2, savedContactPort); // 更新端口
                 contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg"));
                 found = true;
                 break;
@@ -793,20 +793,41 @@ void MainWindow::loadContactsAndAttemptReconnection()
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
             item->setData(Qt::UserRole, uuid);
             item->setData(Qt::UserRole + 1, ip);
-            item->setData(Qt::UserRole + 2, port); // 保存端口
+            item->setData(Qt::UserRole + 2, savedContactPort); // 保存端口
             item->setIcon(QIcon(":/icons/offline.svg"));
         }
 
-        // 尝试重连 (IP直连) - 这部分已经是自动尝试，不需要用户确认
-        // NetworkManager 的 connectToHost 成功后会直接进入已连接状态
-        if (networkManager && !ip.isEmpty() && port > 0)
+        // 尝试重连逻辑
+        if (networkManager && !ip.isEmpty())
         {
-            updateNetworkStatus(tr("Attempting to reconnect to %1 (%2) at %3:%4...")
-                                    .arg(name)
-                                    .arg(uuid)
-                                    .arg(ip)
-                                    .arg(port)); // 使用保存的端口
-            networkManager->connectToHost(name, uuid, ip, port); // 使用保存的端口
+            bool attemptMadeWithLocalListenPortAsTarget = false;
+
+            // 尝试1: 使用本地监听端口 localListenPort 作为目标端口
+            if (localListenPort > 0)
+            {
+                updateNetworkStatus(tr("Attempting reconnect to %1 (UUID: %2) at %3:%4 (using common port convention)...")
+                                        .arg(name).arg(uuid).arg(ip).arg(localListenPort));
+                networkManager->connectToHost(name, uuid, ip, localListenPort);
+                attemptMadeWithLocalListenPortAsTarget = true;
+            }
+
+            // 尝试2: 使用联系人保存的端口 savedContactPort
+            // 条件：savedContactPort 有效，并且
+            //        (之前未使用 localListenPort 尝试 或 savedContactPort 与 localListenPort 不同)
+            if (savedContactPort > 0)
+            {
+                if (attemptMadeWithLocalListenPortAsTarget && savedContactPort == localListenPort)
+                {
+                    // 如果 localListenPort 和 savedContactPort 相同，并且已经尝试过，则不再尝试
+                }
+                else
+                {
+                    // 如果 localListenPort 未尝试过 (例如 localListenPort 为 0)，或者 savedContactPort 与 localListenPort 不同
+                    updateNetworkStatus(tr("Attempting reconnect to %1 (UUID: %2) at %3:%4 (using last known port)...")
+                                            .arg(name).arg(uuid).arg(ip).arg(savedContactPort));
+                    networkManager->connectToHost(name, uuid, ip, savedContactPort);
+                }
+            }
         }
     }
     settings.endArray();

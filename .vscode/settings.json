@@ -4,6 +4,7 @@
         "*.ndjson": "jsonl",
         "*.dbclient-js": "javascript",
         "new": "cpp",
-        "qstackedwidget": "cpp"
+        "qstackedwidget": "cpp",
+        "filesystem": "cpp"
     }
 }
