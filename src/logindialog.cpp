@@ -10,6 +10,10 @@
 #include <QGraphicsDropShadowEffect>
 #include <QPainter> // Required for custom painting if needed
 #include <QPainterPath> // 新增：用于创建圆角路径
+#include <QEvent> // 新增
+#include <QIcon> // 新增：用于按钮图标
+#include <QSizePolicy> // 新增：用于 QSizePolicy
+#include <QWidget> // 新增：用于 QWidget
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent), m_dragging(false)
@@ -27,7 +31,7 @@ LoginDialog::LoginDialog(QWidget *parent)
     // Original containerWidget effective size is 400x490.
     // New Dialog width = 400 (container) + 2 * 20 (margins) = 440
     // New Dialog height = 490 (container) + 2 * 20 (margins) + ~40 (for new row) = 570
-    setFixedSize(440, 500); // 增加了高度以容纳新行
+    setFixedSize(440, 540); // 增加了高度以容纳新行
 }
 
 LoginDialog::~LoginDialog()
@@ -131,24 +135,66 @@ void LoginDialog::setupUi()
     optionsLayout->addWidget(forgotPasswordLabel);
 
     // 新增：登录和注册按钮行
-    QHBoxLayout *actionButtonsLayout = new QHBoxLayout();
-    loginButton = new QPushButton(tr("Login"), formContainer);
+    QWidget *actionButtonsContainer = new QWidget(formContainer); 
+    QHBoxLayout *actionButtonsLayout = new QHBoxLayout(actionButtonsContainer); 
+    actionButtonsLayout->setContentsMargins(0, 0, 0, 0); 
+    actionButtonsLayout->setSpacing(15); // 修改：使用布局的 spacing 属性
+
+    loginButton = new QPushButton(actionButtonsContainer); 
     loginButton->setObjectName("loginButton");
     loginButton->setFixedHeight(45);
+    loginButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); // 新增：明确尺寸策略
 
-    signUpButton = new QPushButton(tr("Sign Up"), formContainer); // 新增注册按钮
+    signUpButton = new QPushButton(actionButtonsContainer); 
     signUpButton->setObjectName("signUpButton");
     signUpButton->setFixedHeight(45);
+    signUpButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed); // 新增：明确尺寸策略
+
+    int totalWidthForButtonsContainer = 340; 
+    int spacingBetweenButtons = 15;
+    int totalWidthForButtonsOnly = totalWidthForButtonsContainer - spacingBetweenButtons;
+
+    // 初始状态：登录82%，注册18%
+    initialLoginWidth = qRound(totalWidthForButtonsOnly * 0.82); // 从 0.75 改为 0.82
+    initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth; 
+
+    // 悬停在注册按钮上时：登录18%，注册82%
+    targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82); // 从 0.75 改为 0.82
+    targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover; 
+
+    // 确保总和严格等于 totalWidthForButtonsOnly
+    // 如果因为 qRound 导致偏差，调整其中一个以匹配
+    if (initialLoginWidth + initialSignUpWidth != totalWidthForButtonsOnly) {
+        initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
+    }
+    if (targetLoginWidthOnSignUpHover + targetSignUpWidthOnSignUpHover != totalWidthForButtonsOnly) {
+        // 确保 signUpButton 获得目标宽度，loginButton 填充剩余
+        targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82); // 重新计算以确保 signUp 优先
+        targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
+    }
+
+    loginButton->setFixedWidth(initialLoginWidth);
+    loginButton->setText(tr("Login")); 
+    loginButton->setIcon(QIcon());    
+
+    signUpButton->setFixedWidth(initialSignUpWidth);
+    signUpButton->setText(""); 
+    signUpButton->setIcon(QIcon(":/icons/register.svg")); 
+    signUpButton->setIconSize(QSize(24, 24)); 
 
     actionButtonsLayout->addWidget(loginButton);
-    actionButtonsLayout->addSpacing(15); // 按钮之间的间距
     actionButtonsLayout->addWidget(signUpButton);
+    
+    actionButtonsLayout->setStretchFactor(loginButton, 0); // 按钮不拉伸
+    actionButtonsLayout->setStretchFactor(signUpButton, 0); // 按钮不拉伸
+
+    actionButtonsContainer->setFixedWidth(totalWidthForButtonsContainer); 
 
     formLayout->addWidget(usernameEdit);
     formLayout->addWidget(passwordEdit);
-    formLayout->addLayout(optionsLayout); // 添加选项行
-    formLayout->addSpacing(10);           // 选项行和按钮行之间的间距
-    formLayout->addLayout(actionButtonsLayout); // 添加操作按钮行
+    formLayout->addLayout(optionsLayout); 
+    formLayout->addSpacing(10);           
+    formLayout->addWidget(actionButtonsContainer); // 5. 将容器QWidget添加到formLayout
     formLayout->addStretch();
 
     containerLayout->addWidget(formContainer, 1);
@@ -162,6 +208,31 @@ void LoginDialog::setupUi()
 
     mainLayout->addWidget(containerWidget);
     setLayout(mainLayout);
+
+    // 初始化动画
+    buttonWidthAnimationGroup = new QParallelAnimationGroup(this);
+
+    loginMinSizeAnimation = new QPropertyAnimation(loginButton, "minimumWidth", this);
+    loginMinSizeAnimation->setDuration(300);
+    loginMinSizeAnimation->setEasingCurve(QEasingCurve::InOutCubic);
+    buttonWidthAnimationGroup->addAnimation(loginMinSizeAnimation);
+
+    loginMaxSizeAnimation = new QPropertyAnimation(loginButton, "maximumWidth", this);
+    loginMaxSizeAnimation->setDuration(300);
+    loginMaxSizeAnimation->setEasingCurve(QEasingCurve::InOutCubic);
+    buttonWidthAnimationGroup->addAnimation(loginMaxSizeAnimation);
+
+    signUpMinSizeAnimation = new QPropertyAnimation(signUpButton, "minimumWidth", this);
+    signUpMinSizeAnimation->setDuration(300);
+    signUpMinSizeAnimation->setEasingCurve(QEasingCurve::InOutCubic);
+    buttonWidthAnimationGroup->addAnimation(signUpMinSizeAnimation);
+
+    signUpMaxSizeAnimation = new QPropertyAnimation(signUpButton, "maximumWidth", this);
+    signUpMaxSizeAnimation->setDuration(300);
+    signUpMaxSizeAnimation->setEasingCurve(QEasingCurve::InOutCubic);
+    buttonWidthAnimationGroup->addAnimation(signUpMaxSizeAnimation);
+
+    signUpButton->installEventFilter(this); // 在 signUpButton 上安装事件过滤器
 
     connect(loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
     connect(minimizeButton, &QPushButton::clicked, this, &LoginDialog::onMinimizeClicked);
@@ -277,6 +348,8 @@ void LoginDialog::applyStyles()
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
+            padding-left: 10px; /* 为图标腾出空间（如果适用） */
+            padding-right: 10px;
         }
         QPushButton#loginButton:hover {
             background-color: #005a9e; /* Darker blue */
@@ -293,6 +366,8 @@ void LoginDialog::applyStyles()
             border-radius: 8px;
             font-size: 16px;
             font-weight: bold;
+            padding-left: 10px; /* 为图标腾出空间（如果适用） */
+            padding-right: 10px;
         }
         QPushButton#signUpButton:hover {
             background-color: #e0e0e0; 
@@ -445,4 +520,64 @@ QPixmap LoginDialog::createRoundedPixmap(const QPixmap &source, int radius)
     painter.drawPixmap(0, 0, source);
 
     return result;
+}
+
+bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
+{
+    if (watched == signUpButton) {
+        if (event->type() == QEvent::Enter) {
+            buttonWidthAnimationGroup->stop(); 
+
+            // 获取当前的实际宽度作为动画起点
+            int currentLoginWidth = loginButton->width();
+            int currentSignUpWidth = signUpButton->width();
+
+            loginMinSizeAnimation->setStartValue(currentLoginWidth);
+            loginMaxSizeAnimation->setStartValue(currentLoginWidth);
+            signUpMinSizeAnimation->setStartValue(currentSignUpWidth);
+            signUpMaxSizeAnimation->setStartValue(currentSignUpWidth);
+
+            loginMinSizeAnimation->setEndValue(targetLoginWidthOnSignUpHover);
+            loginMaxSizeAnimation->setEndValue(targetLoginWidthOnSignUpHover);
+            signUpMinSizeAnimation->setEndValue(targetSignUpWidthOnSignUpHover);
+            signUpMaxSizeAnimation->setEndValue(targetSignUpWidthOnSignUpHover);
+            
+            signUpButton->setText(tr("Sign Up"));
+            signUpButton->setIcon(QIcon());
+
+            loginButton->setText("");
+            loginButton->setIcon(QIcon(":/icons/login.svg"));
+            loginButton->setIconSize(QSize(24, 24)); 
+
+            buttonWidthAnimationGroup->start();
+            return true; 
+        } else if (event->type() == QEvent::Leave) {
+            buttonWidthAnimationGroup->stop(); 
+
+            // 获取当前的实际宽度作为动画起点
+            int currentLoginWidth = loginButton->width();
+            int currentSignUpWidth = signUpButton->width();
+
+            loginMinSizeAnimation->setStartValue(currentLoginWidth);
+            loginMaxSizeAnimation->setStartValue(currentLoginWidth);
+            signUpMinSizeAnimation->setStartValue(currentSignUpWidth);
+            signUpMaxSizeAnimation->setStartValue(currentSignUpWidth);
+
+            loginMinSizeAnimation->setEndValue(initialLoginWidth);
+            loginMaxSizeAnimation->setEndValue(initialLoginWidth);
+            signUpMinSizeAnimation->setEndValue(initialSignUpWidth);
+            signUpMaxSizeAnimation->setEndValue(initialSignUpWidth);
+
+            signUpButton->setText("");
+            signUpButton->setIcon(QIcon(":/icons/register.svg"));
+            signUpButton->setIconSize(QSize(24, 24));
+
+            loginButton->setText(tr("Login"));
+            loginButton->setIcon(QIcon());
+            
+            buttonWidthAnimationGroup->start();
+            return true; 
+        }
+    }
+    return QDialog::eventFilter(watched, event);
 }
