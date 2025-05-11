@@ -39,48 +39,80 @@ NetworkEventHandler::NetworkEventHandler(
 {
 }
 
-void NetworkEventHandler::handlePeerConnected(const QString &peerUuid, const QString &peerName, const QString& peerAddress, quint16 peerPort)
+void NetworkEventHandler::handlePeerConnected(const QString &peerUuid, const QString &peerName, const QString &peerAddress, quint16 peerPort)
 {
-    if (!mainWindowPtr || !networkManager || !peerInfoDisplayWidget || !contactListWidget || !chatStackedWidget || !messageInputEdit) return;
+    if (!mainWindowPtr) return; // Guard
 
-    mainWindowPtr->updateNetworkStatus(tr("Peer '%1' (UUID: %2) connected from %3:%4.").arg(peerName).arg(peerUuid).arg(peerAddress).arg(peerPort));
+    qDebug() << "NEH::handlePeerConnected: UUID:" << peerUuid << "Name:" << peerName << "Addr:" << peerAddress << "ConnectedOnPort:" << peerPort;
 
-    mainWindowPtr->handleContactAdded(peerName, peerUuid, peerAddress, peerPort);
-
-    QListWidgetItem *itemToSelect = nullptr;
-    for (int i = 0; i < contactListWidget->count(); ++i) {
-        QListWidgetItem *existingItem = contactListWidget->item(i);
-        if (existingItem->data(Qt::UserRole).toString() == peerUuid) {
-            itemToSelect = existingItem;
-            if (itemToSelect->text() != peerName) {
-                itemToSelect->setText(peerName);
-            }
-            // 确保图标更新为在线
-            itemToSelect->setIcon(QIcon(":/icons/online.svg"));
+    QListWidgetItem *existingItem = nullptr;
+    for (int i = 0; i < contactListWidget->count(); ++i)
+    {
+        if (contactListWidget->item(i)->data(Qt::UserRole).toString() == peerUuid)
+        {
+            existingItem = contactListWidget->item(i);
             break;
         }
     }
 
-    if (itemToSelect) {
-        // 检查是否是当前选中的项
-        if (contactListWidget->currentItem() == itemToSelect) {
-            // 如果是当前选中的项，并且连接成功了，则需要手动更新UI状态，
-            // 因为 currentItemChanged 可能不会再次触发 onContactSelected
-            peerInfoDisplayWidget->updateDisplay(peerName, peerUuid, peerAddress, peerPort);
-            messageInputEdit->setEnabled(true);
-            messageInputEdit->setFocus();
-            if (chatStackedWidget->currentWidget() != activeChatContentsWidget) {
-                 chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
-            }
-        } else if (!contactListWidget->currentItem() || contactListWidget->currentItem()->data(Qt::UserRole).toString() == peerUuid) {
-            // 如果没有选中项，或者选中的就是这个刚连接的项（但上面if已处理），则选中它
-            // 这个分支主要用于首次连接或切换到此联系人时
-            contactListWidget->setCurrentItem(itemToSelect); // 这会触发 onContactSelected
-            // onContactSelected 会处理 messageInputEdit->setFocus() 和其他UI更新
+    quint16 portToStore;
+
+    if (existingItem)
+    {
+        // Contact exists. Update its name (if different) and IP.
+        qDebug() << "NEH::handlePeerConnected: Existing contact" << peerUuid << ". Current listening port stored:" << existingItem->data(Qt::UserRole + 2).toUInt();
+        portToStore = existingItem->data(Qt::UserRole + 2).toUInt(); // Use existing stored listening port
+        
+        if (existingItem->text() != peerName) {
+            existingItem->setText(peerName); // Update display name if it changed
         }
-        // 如果 itemToSelect 不是当前选中的项，它的图标已经在上面设置了，
-        // 当用户点击它时，onContactSelected 会处理其余的UI更新。
+        // Update IP if it changed
+        if (existingItem->data(Qt::UserRole + 1).toString() != peerAddress) {
+            existingItem->setData(Qt::UserRole + 1, peerAddress);
+        }
+         // Call handleContactAdded to ensure contact list consistency and trigger save if needed.
+         // It will update if name/ip changed, using the correct listening port.
+        mainWindowPtr->handleContactAdded(peerName, peerUuid, peerAddress, portToStore);
+
     }
+    else
+    {
+        // New contact.
+        portToStore = mainWindowPtr->getLocalListenPort(); // Use current user's listen port as default for peer's listening port.
+        qDebug() << "NEH::handlePeerConnected: New contact" << peerUuid << ". Using current user's listen port as default for peer's listening port:" << portToStore;
+        mainWindowPtr->handleContactAdded(peerName, peerUuid, peerAddress, portToStore);
+    }
+
+    // Update UI for the connected peer
+    for (int i = 0; i < contactListWidget->count(); ++i)
+    {
+        QListWidgetItem *item = contactListWidget->item(i);
+        if (item->data(Qt::UserRole).toString() == peerUuid)
+        {
+            item->setIcon(QIcon(":/icons/online.svg"));
+            quint16 actualStoredPort = item->data(Qt::UserRole + 2).toUInt();
+
+            // If this is the currently selected chat, refresh its info and enable input
+            // This part handles updates if the item was already current.
+            if (contactListWidget->currentItem() == item)
+            {
+                if (peerInfoDisplayWidget) {
+                     // Use actualStoredPort (which is the listening port) for display
+                    peerInfoDisplayWidget->updateDisplay(peerName, peerUuid, peerAddress, actualStoredPort);
+                }
+                if (messageInputEdit) messageInputEdit->setEnabled(true);
+                if (chatStackedWidget && activeChatContentsWidget && chatStackedWidget->currentWidget() != activeChatContentsWidget) {
+                    chatStackedWidget->setCurrentWidget(activeChatContentsWidget);
+                }
+            }
+            
+            // Ensure this item becomes the current item to open/refresh the chat window.
+            // This will trigger MainWindow::onContactSelected.
+            contactListWidget->setCurrentItem(item);
+            break;
+        }
+    }
+    mainWindowPtr->updateNetworkStatus(tr("Connected to %1 (UUID: %2).").arg(peerName).arg(peerUuid));
 }
 
 void NetworkEventHandler::handlePeerDisconnected(const QString &peerUuid)

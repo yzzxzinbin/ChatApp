@@ -14,7 +14,11 @@
 // UDP发现相关常量
 const quint16 DISCOVERY_UDP_PORT = 60249; // UDP广播和监听的端口
 const int UDP_BROADCAST_INTERVAL_MS = 5000; // 5秒广播一次
-const QString UDP_DISCOVERY_MSG_PREFIX = "CHAT_DISCOVERY_V1";
+const QString UDP_DISCOVERY_MSG_PREFIX = "CHAT_DISCOVERY_V1"; // For ANNOUNCE
+const QString UDP_NEED_CONNECTION_PREFIX = "CHAT_NEED_CONN_V1"; // For NEED
+const QString UDP_RESPONSE_TO_NEED_PREFIX = "CHAT_RESP_NEED_V1"; // For REQNEED (Response to NEED)
+const QString UDP_REPLY_TO_PORT_FIELD_KEY = "ReplyToUDPPort"; // New: Key for reply port in NEED message
+const int UDP_TEMP_RESPONSE_LISTENER_TIMEOUT_MS = 15000; // New: Timeout for temporary listener (15s)
 
 class NetworkManager : public QObject
 {
@@ -127,10 +131,16 @@ private slots:
     // 新增UDP相关槽函数
     void sendUdpBroadcast(); // 保持声明，但不再由定时器调用
     void processPendingUdpDatagrams();
+    void processUdpResponseToNeed(); // 新增：处理临时UDP监听器收到的REQNEED
+    void handleUdpResponseListenerTimeout(); // 新增：处理临时UDP监听器超时
+    void handleTemporaryUdpSocketError(QAbstractSocket::SocketError socketError); // 新增：处理临时UDP监听器错误
 
 private:
-    QTcpServer *tcpServer;      // TCP服务器对象
-    QUdpSocket *udpSocket;      // UDP套接字
+    QTcpServer *tcpServer;
+    QUdpSocket *udpDiscoveryListenerSocket;
+    QUdpSocket *udpBroadcastSenderSocket;
+    QUdpSocket *udpTemporaryResponseListenerSocket;
+    QTimer *udpResponseListenerTimer;
     
     // 管理已建立的连接
     QMap<QString, QTcpSocket*> connectedSockets; // Key: Peer UUID
@@ -139,7 +149,8 @@ private:
 
     // 管理正在建立的连接
     QList<QTcpSocket*> pendingIncomingSockets; // Sockets from onNewConnection, waiting for HELLO
-    QMap<QTcpSocket*, QString> outgoingSocketsAwaitingSessionAccepted; // Key: Socket, Value: TentativePeerName for this outgoing connection
+    // Key: Socket, Value: Pair of (TentativePeerName, TargetPeerUUIDHint)
+    QMap<QTcpSocket*, QPair<QString, QString>> outgoingSocketsAwaitingSessionAccepted; 
 
     quint16 defaultPort;        // 默认端口 (保留，但首选端口更重要)
     QString lastError;          // 最后发生的通用服务器错误字符串
@@ -155,6 +166,7 @@ private:
     bool autoStartListeningEnabled; // 新增：用户是否启用了监听
     bool udpDiscoveryEnabled;       // 新增：用户是否启用了UDP发现
     QTimer *retryListenTimer;       // 新增：重试监听的计时器
+    QTimer *udpBroadcastTimer;      // 新增：声明udpBroadcastTimer
     int retryListenIntervalMs;      // 新增：重试间隔
 
     void setupServer();
@@ -170,6 +182,8 @@ private:
     // 新增辅助方法
     QList<QHostAddress> getLocalIpAddresses() const;
     bool isSelfConnection(const QString& targetHost, quint16 targetPort) const;
+    void cleanupTemporaryUdpResponseListener(); // 新增：清理临时UDP监听器
+    QString getDiscoveryMessageValue(const QStringList& parts, const QString& key) const; // 新增：解析消息字段
 };
 
 #endif // NETWORKMANAGER_H

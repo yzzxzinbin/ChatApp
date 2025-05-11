@@ -42,6 +42,7 @@ public:
     ~MainWindow();
     QString getLocalUserName() const;
     QString getLocalUserUuid() const; // 新增
+    quint16 getLocalListenPort() const; // Add the public getter method
     void updateNetworkStatus(const QString &status); // Make updateNetworkStatus public
     void loadOrCreateUserIdentity(); // 新增方法
     void saveChatHistory(const QString& peerUuid); // 确保此方法是 public 或 NetworkEventHandler 可以访问

@@ -22,6 +22,7 @@ set(PROJECT_SOURCES
         src/chatmessagedisplay.cpp
         src/networkmanager.h
         src/networkmanager.cpp
+        src/networkmanager_udp.cpp
         src/addcontactdialog.cpp
         src/addcontactdialog.h
         src/settingsdialog.cpp

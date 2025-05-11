@@ -206,6 +206,12 @@ QString MainWindow::getLocalUserUuid() const
     return localUserUuid;
 }
 
+// Add the implementation for the new getter method
+quint16 MainWindow::getLocalListenPort() const
+{
+    return localListenPort;
+}
+
 void MainWindow::onClearButtonClicked()
 {
     messageInputEdit->clear();

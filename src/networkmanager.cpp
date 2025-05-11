@@ -22,7 +22,10 @@ QString extractAttribute(const QString& message, const QString& attributeName) {
 NetworkManager::NetworkManager(QObject *parent)
     : QObject(parent),
       tcpServer(nullptr),
-      udpSocket(nullptr),             // 初始化udpSocket
+      udpDiscoveryListenerSocket(nullptr),
+      udpBroadcastSenderSocket(nullptr),
+      udpTemporaryResponseListenerSocket(nullptr), 
+      udpResponseListenerTimer(nullptr), // Ensure this is also initialized if used before assignment
       defaultPort(60248),
       preferredListenPort(60248),
       autoStartListeningEnabled(true),
@@ -37,6 +40,13 @@ NetworkManager::NetworkManager(QObject *parent)
     setupServer(); 
     retryListenTimer = new QTimer(this);
     connect(retryListenTimer, &QTimer::timeout, this, &NetworkManager::attemptToListen);
+
+    udpBroadcastTimer = new QTimer(this); // Initialize broadcast timer
+    connect(udpBroadcastTimer, &QTimer::timeout, this, &NetworkManager::sendUdpBroadcast);
+
+    udpResponseListenerTimer = new QTimer(this); 
+    udpResponseListenerTimer->setSingleShot(true); // New init
+    connect(udpResponseListenerTimer, &QTimer::timeout, this, &NetworkManager::handleUdpResponseListenerTimeout); // New init
 }
 
 NetworkManager::~NetworkManager()
@@ -46,7 +56,14 @@ NetworkManager::~NetworkManager()
     if (retryListenTimer) {
         qDebug() << "NetworkManager::~NetworkManager() - Stopping retryListenTimer";
         retryListenTimer->stop();
-        // retryListenTimer is a child of NetworkManager, will be deleted by Qt
+    }
+    if (udpBroadcastTimer) { // Stop broadcast timer
+        qDebug() << "NetworkManager::~NetworkManager() - Stopping udpBroadcastTimer";
+        udpBroadcastTimer->stop();
+    }
+    if (udpResponseListenerTimer) { // Stop response listener timer
+        qDebug() << "NetworkManager::~NetworkManager() - Stopping udpResponseListenerTimer";
+        udpResponseListenerTimer->stop();
     }
 
     qDebug() << "NetworkManager::~NetworkManager() - Calling stopListening()";
@@ -54,11 +71,6 @@ NetworkManager::~NetworkManager()
     qDebug() << "NetworkManager::~NetworkManager() - Calling stopUdpDiscovery()";
     stopUdpDiscovery(); 
 
-    // Sockets in pendingIncomingSockets and outgoingSocketsAwaitingSessionAccepted
-    // should have been cleaned up (aborted and deleteLater'd) by stopListening()
-    // and their respective lists cleared.
-    // If they are children of NetworkManager, explicit qDeleteAll here is redundant
-    // but harmless if the lists are already empty.
     qDebug() << "NetworkManager::~NetworkManager() - Cleaning up any remaining pendingIncomingSockets (should be empty)";
     qDeleteAll(pendingIncomingSockets);
     pendingIncomingSockets.clear();
@@ -73,12 +85,22 @@ NetworkManager::~NetworkManager()
         tcpServer->deleteLater(); 
         tcpServer = nullptr; 
     }
-    if (udpSocket) { 
-        qDebug() << "NetworkManager::~NetworkManager() - Disconnecting and deleting udpSocket";
-        disconnect(udpSocket, nullptr, nullptr, nullptr); // Disconnect signals before deletion
-        udpSocket->deleteLater();
-        udpSocket = nullptr; 
+    // Clean up UDP sockets
+    if (udpDiscoveryListenerSocket) { 
+        qDebug() << "NetworkManager::~NetworkManager() - Disconnecting and deleting udpDiscoveryListenerSocket";
+        disconnect(udpDiscoveryListenerSocket, nullptr, nullptr, nullptr);
+        udpDiscoveryListenerSocket->deleteLater();
+        udpDiscoveryListenerSocket = nullptr; 
     }
+    if (udpBroadcastSenderSocket) {
+        qDebug() << "NetworkManager::~NetworkManager() - Disconnecting and deleting udpBroadcastSenderSocket";
+        disconnect(udpBroadcastSenderSocket, nullptr, nullptr, nullptr);
+        udpBroadcastSenderSocket->deleteLater();
+        udpBroadcastSenderSocket = nullptr;
+    }
+    
+    cleanupTemporaryUdpResponseListener(); // New: Cleanup temporary UDP listener
+
     qDebug() << "NetworkManager::~NetworkManager() - Destruction finished";
 }
 
@@ -241,15 +263,31 @@ bool NetworkManager::isSelfConnection(const QString& targetHost, quint16 targetP
 
 void NetworkManager::connectToHost(const QString &peerNameToSet, const QString &targetPeerUuidHint, const QString &hostAddress, quint16 port)
 {
-    Q_UNUSED(targetPeerUuidHint);
     qDebug() << "NM::connectToHost: Attempting to connect to Name:" << peerNameToSet
              << "IP:" << hostAddress << "Port:" << port
-             << "My UUID:" << localUserUuid << "My NameHint:" << localUserDisplayName;
+             << "My UUID:" << localUserUuid << "My NameHint:" << localUserDisplayName
+             << "Target UUID Hint:" << targetPeerUuidHint;
 
     if (isSelfConnection(hostAddress, port)) {
         qWarning() << "NM::connectToHost: Attempt to connect to self (" << hostAddress << ":" << port << ") aborted.";
         emit serverStatusMessage(tr("Attempt to connect to self (%1:%2) was aborted.").arg(hostAddress).arg(port));
         return;
+    }
+
+    if (!targetPeerUuidHint.isEmpty() && connectedSockets.contains(targetPeerUuidHint)) {
+        qWarning() << "NM::connectToHost: Attempt to connect to already connected peer UUID" << targetPeerUuidHint << ". Aborting.";
+        emit serverStatusMessage(tr("Peer %1 (UUID: %2) is already connected. Connection attempt aborted.").arg(peerNameToSet).arg(targetPeerUuidHint));
+        return;
+    }
+
+    if (!targetPeerUuidHint.isEmpty()) {
+        for (const QPair<QString, QString>& attemptDetails : outgoingSocketsAwaitingSessionAccepted.values()) { 
+            if (attemptDetails.second == targetPeerUuidHint) {
+                qWarning() << "NM::connectToHost: Outgoing connection attempt already in progress for UUID" << targetPeerUuidHint << ". Aborting new attempt.";
+                emit serverStatusMessage(tr("Outgoing connection to %1 (UUID: %2) already in progress. New attempt aborted.").arg(peerNameToSet).arg(targetPeerUuidHint));
+                return;
+            }
+        }
     }
 
     QTcpSocket *socket = new QTcpSocket(this);
@@ -263,7 +301,7 @@ void NetworkManager::connectToHost(const QString &peerNameToSet, const QString &
         }
     }
 
-    outgoingSocketsAwaitingSessionAccepted.insert(socket, peerNameToSet);
+    outgoingSocketsAwaitingSessionAccepted.insert(socket, qMakePair(peerNameToSet, targetPeerUuidHint));
 
     connect(socket, &QTcpSocket::connected, this, &NetworkManager::handleOutgoingSocketConnected);
     connect(socket, &QTcpSocket::disconnected, this, &NetworkManager::handleOutgoingSocketDisconnected);
@@ -373,175 +411,18 @@ void NetworkManager::setUdpDiscoveryPreferences(bool enabled)
     if (udpDiscoveryEnabled == enabled) return;
 
     udpDiscoveryEnabled = enabled;
+    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled");
     if (udpDiscoveryEnabled) {
-        startUdpDiscovery();
+        startUdpDiscovery(); 
+        if (udpBroadcastTimer && !udpBroadcastTimer->isActive()) { // Start periodic broadcast if enabled
+            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
+        }
     } else {
         stopUdpDiscovery();
-    }
-}
-
-void NetworkManager::startUdpDiscovery()
-{
-    if (!udpDiscoveryEnabled) {
-        emit serverStatusMessage(tr("UDP discovery is disabled by user settings."));
-        return;
-    }
-
-    if (udpSocket && udpSocket->state() != QAbstractSocket::UnconnectedState) {
-        emit serverStatusMessage(tr("UDP discovery is already active on port %1.").arg(DISCOVERY_UDP_PORT));
-        return;
-    }
-
-    if (udpSocket) { 
-        qDebug() << "NM::startUdpDiscovery: Cleaning up old udpSocket.";
-        disconnect(udpSocket, nullptr, nullptr, nullptr);
-        udpSocket->close();
-        udpSocket->deleteLater();
-        udpSocket = nullptr; 
-    }
-
-    udpSocket = new QUdpSocket(this);
-    connect(udpSocket, &QUdpSocket::readyRead, this, &NetworkManager::processPendingUdpDatagrams);
-    connect(udpSocket, &QUdpSocket::errorOccurred, this, [this](QAbstractSocket::SocketError socketError){
-        Q_UNUSED(socketError);
-        if(udpSocket) {
-            emit serverStatusMessage(tr("UDP Socket Error: %1").arg(udpSocket->errorString()));
-        } else {
-            emit serverStatusMessage(tr("UDP Socket Error on an already deleted socket."));
+        if (udpBroadcastTimer && udpBroadcastTimer->isActive()) { // Stop periodic broadcast
+            udpBroadcastTimer->stop();
         }
-    });
-
-    if (udpSocket->bind(QHostAddress::AnyIPv4, DISCOVERY_UDP_PORT, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) {
-        emit serverStatusMessage(tr("UDP discovery started, listening on port %1.").arg(DISCOVERY_UDP_PORT));
-        sendUdpBroadcast();
-    } else {
-        emit serverStatusMessage(tr("UDP discovery could not start on port %1: %2").arg(DISCOVERY_UDP_PORT).arg(udpSocket->errorString()));
-        if (udpSocket) {
-            udpSocket->deleteLater();
-            udpSocket = nullptr;
-        }
-    }
-}
-
-void NetworkManager::stopUdpDiscovery()
-{
-    if (udpSocket) {
-        qDebug() << "NM::stopUdpDiscovery: Stopping UDP discovery. Current state:" << udpSocket->state();
-        if (udpSocket->state() != QAbstractSocket::UnconnectedState) {
-            udpSocket->close();
-            emit serverStatusMessage(tr("UDP discovery stopped."));
-        }
-    } else {
-        qDebug() << "NM::stopUdpDiscovery: udpSocket is already null.";
-    }
-}
-
-void NetworkManager::triggerManualUdpBroadcast()
-{
-    if (!udpDiscoveryEnabled) {
-        emit serverStatusMessage(tr("Cannot send manual broadcast: UDP discovery is disabled."));
-        return;
-    }
-    if (!udpSocket || udpSocket->state() == QAbstractSocket::UnconnectedState) {
-        emit serverStatusMessage(tr("Cannot send manual broadcast: UDP socket not ready. Try enabling discovery first."));
-        return;
-    }
-    emit serverStatusMessage(tr("Sending manual UDP discovery broadcast..."));
-    sendUdpBroadcast();
-}
-
-void NetworkManager::sendUdpBroadcast()
-{
-    if (!udpSocket || !udpDiscoveryEnabled || localUserUuid.isEmpty() || !tcpServer || !tcpServer->isListening()) {
-        if (udpDiscoveryEnabled && (!tcpServer || !tcpServer->isListening())) {
-             qDebug() << "NM::sendUdpBroadcast: Skipping broadcast because TCP server is not listening.";
-        }
-        return;
-    }
-
-    QString message = QString("%1;UUID=%2;Name=%3;TCPPort=%4;")
-                          .arg(UDP_DISCOVERY_MSG_PREFIX)
-                          .arg(localUserUuid)
-                          .arg(localUserDisplayName)
-                          .arg(tcpServer->serverPort());
-
-    QByteArray datagram = message.toUtf8();
-    qint64 bytesSent = udpSocket->writeDatagram(datagram, QHostAddress::Broadcast, DISCOVERY_UDP_PORT);
-
-    if (bytesSent == -1) {
-        emit serverStatusMessage(tr("UDP broadcast failed: %1").arg(udpSocket->errorString()));
-    } else {
-        qDebug() << "NM::sendUdpBroadcast: Sent" << bytesSent << "bytes:" << message;
-    }
-}
-
-void NetworkManager::processPendingUdpDatagrams()
-{
-    if (!udpSocket) return;
-
-    while (udpSocket->hasPendingDatagrams()) {
-        QByteArray datagram;
-        datagram.resize(udpSocket->pendingDatagramSize());
-        QHostAddress senderAddress;
-        quint16 senderPort;
-
-        udpSocket->readDatagram(datagram.data(), datagram.size(), &senderAddress, &senderPort);
-
-        QString message = QString::fromUtf8(datagram);
-        qDebug() << "NM::processPendingUdpDatagrams: Received from" << senderAddress.toString() << ":" << senderPort << "Data:" << message;
-
-        if (!message.startsWith(UDP_DISCOVERY_MSG_PREFIX)) {
-            qDebug() << "NM::processPendingUdpDatagrams: Ignoring non-discovery message:" << message;
-            continue;
-        }
-
-        QStringList parts = message.split(';', Qt::SkipEmptyParts);
-        if (parts.length() < 4 || parts[0] != UDP_DISCOVERY_MSG_PREFIX) { 
-            qWarning() << "NM::processPendingUdpDatagrams: Malformed or non-matching prefix discovery message:" << message;
-            continue;
-        }
-
-        QString peerUuid;
-        QString peerNameHint;
-        quint16 peerTcpPort = 0;
-
-        for (const QString& part : parts) {
-            if (part.startsWith("UUID=")) {
-                peerUuid = part.mid(4);
-            } else if (part.startsWith("Name=")) {
-                peerNameHint = part.mid(5);
-            } else if (part.startsWith("TCPPort=")) {
-                bool ok;
-                peerTcpPort = part.mid(8).toUShort(&ok);
-                if (!ok) {
-                    qWarning() << "NM::processPendingUdpDatagrams: Invalid TCPPort in discovery message:" << message;
-                    peerTcpPort = 0;
-                }
-            }
-        }
-
-        if (peerUuid.isEmpty() || peerTcpPort == 0) {
-            qWarning() << "NM::processPendingUdpDatagrams: Missing UUID or TCPPort in discovery message:" << message;
-            continue;
-        }
-
-        if (peerUuid == localUserUuid) {
-            qDebug() << "NM::processPendingUdpDatagrams: Ignoring own broadcast.";
-            continue;
-        }
-
-        if (connectedSockets.contains(peerUuid)) {
-            qDebug() << "NM::processPendingUdpDatagrams: Peer" << peerUuid << "is already connected. Ignoring discovery.";
-            continue;
-        }
-        
-        emit serverStatusMessage(tr("UDP Discovery: Found peer %1 (UUID: %2) at %3, TCP Port: %4. Attempting TCP connection.")
-                                 .arg(peerNameHint)
-                                 .arg(peerUuid)
-                                 .arg(senderAddress.toString())
-                                 .arg(peerTcpPort));
-        
-        connectToHost(peerNameHint.isEmpty() ? peerUuid : peerNameHint, peerUuid, senderAddress.toString(), peerTcpPort);
+        cleanupTemporaryUdpResponseListener(); // Also cleanup if discovery is disabled
     }
 }
 
@@ -714,7 +595,7 @@ void NetworkManager::handleOutgoingSocketConnected()
     QTcpSocket *socket = qobject_cast<QTcpSocket*>(sender());
     if (!socket) return;
 
-    QString peerNameToSet = outgoingSocketsAwaitingSessionAccepted.value(socket, "Unknown Peer");
+    QString peerNameToSet = outgoingSocketsAwaitingSessionAccepted.value(socket).first;
     qDebug() << "NM::OutgoingSocketConnected: TCP link with" << peerNameToSet << "established. Sending HELLO. My UUID:" << localUserUuid << "My Name:" << localUserDisplayName;
     emit serverStatusMessage(tr("TCP link established with %1 (%2:%3). Sending HELLO...")
                              .arg(peerNameToSet)
@@ -740,56 +621,53 @@ void NetworkManager::handleOutgoingSocketReadyRead()
     in >> message;
 
     if (in.commitTransaction()) {
-        QString localNameForPeerAttempt = outgoingSocketsAwaitingSessionAccepted.value(socket, "Unknown");
-        qDebug() << "NM::OutgoingSocketReadyRead: Received message:" << message << "from attempted peer:" << localNameForPeerAttempt;
+        QString localNameForPeerAttempt = outgoingSocketsAwaitingSessionAccepted.value(socket).first;
+        QString targetPeerUuidHint = outgoingSocketsAwaitingSessionAccepted.value(socket).second; // Get the UUID hint
+
+        qDebug() << "NM::OutgoingSocketReadyRead: Received message:" << message << "from attempted peer:" << localNameForPeerAttempt << "UUID Hint:" << targetPeerUuidHint;
         if (message.startsWith("<SYS_SESSION_ACCEPTED")) {
             QString peerUuid = extractAttribute(message, "UUID");
-            QString peerReportedName = extractAttribute(message, "Name");
-            qDebug() << "NM::OutgoingSocketReadyRead: SESSION_ACCEPTED. PeerUUID:" << peerUuid << "PeerReportedName:" << peerReportedName;
-            qDebug() << "NM::OutgoingSocketReadyRead: Local user UUID for comparison:" << localUserUuid;
+            QString peerName = extractAttribute(message, "Name");
 
-            if (peerUuid.isEmpty() || peerUuid == localUserUuid) {
-                qWarning() << "NM::OutgoingSocketReadyRead: Invalid SESSION_ACCEPTED - peerUUID is empty or matches localUserUuid. PeerUUID:" << peerUuid << "LocalUUID:" << localUserUuid;
-                emit serverStatusMessage(tr("Error: Received SESSION_ACCEPTED from %1 without valid UUID or self-connect. Disconnecting.")
-                                         .arg(localNameForPeerAttempt));
-                emit outgoingConnectionFailed(localNameForPeerAttempt, tr("Invalid SESSION_ACCEPTED (UUID error)"));
-                removeOutgoingSocketAwaitingAcceptance(socket);
+            if (peerUuid.isEmpty()) {
+                qWarning() << "NM::OutgoingSocketReadyRead: SESSION_ACCEPTED from" << localNameForPeerAttempt << "missing UUID. Closing.";
+                emit serverStatusMessage(tr("Error: SESSION_ACCEPTED from %1 missing UUID. Closing connection.").arg(localNameForPeerAttempt));
+                outgoingSocketsAwaitingSessionAccepted.remove(socket);
                 socket->abort();
                 return;
             }
-            if (connectedSockets.contains(peerUuid)) {
-                 qWarning() << "NM::OutgoingSocketReadyRead: SESSION_ACCEPTED for already connected peer (race condition?). PeerUUID:" << peerUuid;
-                 emit serverStatusMessage(tr("Error: Peer %1 (UUID: %2) is already connected (race condition?). Ignoring new session acceptance.")
-                                          .arg(localNameForPeerAttempt).arg(peerUuid));
-                 emit outgoingConnectionFailed(localNameForPeerAttempt, tr("Peer already connected (race condition)"));
-                 removeOutgoingSocketAwaitingAcceptance(socket);
-                 socket->abort();
-                 return;
+            // Optional: Verify if peerUuid matches targetPeerUuidHint if hint was provided
+            if (!targetPeerUuidHint.isEmpty() && peerUuid != targetPeerUuidHint) {
+                qWarning() << "NM::OutgoingSocketReadyRead: SESSION_ACCEPTED UUID" << peerUuid << "does not match Hint" << targetPeerUuidHint << "from" << localNameForPeerAttempt << ".Proceeding with received UUID.";
+                // Decide if this is an error or just a mismatch to log. For now, proceed.
             }
 
-            emit serverStatusMessage(tr("Session with %1 (UUID: %2, Reported Name: %3) accepted by peer.")
-                                     .arg(localNameForPeerAttempt).arg(peerUuid).arg(peerReportedName));
-            qDebug() << "NM::OutgoingSocketReadyRead: Session accepted. Adding to established connections. PeerUUID:" << peerUuid << "LocalName:" << localNameForPeerAttempt;
 
-            removeOutgoingSocketAwaitingAcceptance(socket);
-            addEstablishedConnection(socket, peerUuid, localNameForPeerAttempt, socket->peerAddress().toString(), socket->peerPort());
+            emit serverStatusMessage(tr("Session accepted by %1 (UUID: %2). Connection established.")
+                                     .arg(peerName.isEmpty() ? localNameForPeerAttempt : peerName)
+                                     .arg(peerUuid));
+            
+            // Transition socket from pending to connected
+            outgoingSocketsAwaitingSessionAccepted.remove(socket);
+            // Corrected function call:
+            addEstablishedConnection(socket, peerUuid, 
+                                     peerName.isEmpty() ? localNameForPeerAttempt : peerName, 
+                                     socket->peerAddress().toString(), socket->peerPort());
+            emit peerConnected(peerUuid, peerName.isEmpty() ? localNameForPeerAttempt : peerName, socket->peerAddress().toString(), socket->peerPort());
 
         } else if (message.startsWith("<SYS_SESSION_REJECTED")) {
             QString reason = extractAttribute(message, "Reason");
-            qWarning() << "NM::OutgoingSocketReadyRead: Session REJECTED by peer. Peer:" << localNameForPeerAttempt << "Reason:" << reason;
-            emit serverStatusMessage(tr("Session with %1 rejected by peer. Reason: %2")
+            qWarning() << "NM::OutgoingSocketReadyRead: Session rejected by" << localNameForPeerAttempt << "Reason:" << reason;
+            emit serverStatusMessage(tr("Session rejected by %1. Reason: %2")
                                      .arg(localNameForPeerAttempt)
-                                     .arg(reason.isEmpty() ? "No reason given" : reason));
-            emit outgoingConnectionFailed(localNameForPeerAttempt, tr("Session rejected by peer: %1").arg(reason.isEmpty() ? tr("No reason given") : reason));
-            removeOutgoingSocketAwaitingAcceptance(socket);
-            socket->abort();
+                                     .arg(reason.isEmpty() ? tr("Unknown") : reason));
+            outgoingSocketsAwaitingSessionAccepted.remove(socket);
+            socket->abort(); // This will trigger handleOutgoingSocketDisconnected
         } else {
-            qWarning() << "NM::OutgoingSocketReadyRead: Expected SESSION_ACCEPTED/REJECTED, got:" << message.left(50) << "from" << localNameForPeerAttempt;
-            emit serverStatusMessage(tr("Expected SESSION_ACCEPTED/REJECTED from %1, got: %2. Disconnecting.")
-                                     .arg(localNameForPeerAttempt)
-                                     .arg(message.left(50)));
-            emit outgoingConnectionFailed(localNameForPeerAttempt, tr("Invalid response from peer"));
-            removeOutgoingSocketAwaitingAcceptance(socket);
+            qWarning() << "NM::OutgoingSocketReadyRead: Expected SESSION_ACCEPTED or REJECTED from" << localNameForPeerAttempt << "got:" << message.left(50);
+            emit serverStatusMessage(tr("Error: Unexpected response from %1: %2. Closing.")
+                                     .arg(localNameForPeerAttempt).arg(message.left(50)));
+            outgoingSocketsAwaitingSessionAccepted.remove(socket);
             socket->abort();
         }
     }
@@ -800,7 +678,7 @@ void NetworkManager::handleOutgoingSocketDisconnected()
     QTcpSocket *socket = qobject_cast<QTcpSocket*>(sender());
     if (!socket) return;
     if (outgoingSocketsAwaitingSessionAccepted.contains(socket)) {
-        QString peerName = outgoingSocketsAwaitingSessionAccepted.value(socket, "Unknown Peer");
+        QString peerName = outgoingSocketsAwaitingSessionAccepted.value(socket).first;
         emit serverStatusMessage(tr("Outgoing connection to %1 failed or disconnected before session established.")
                                  .arg(peerName));
         emit outgoingConnectionFailed(peerName, tr("Disconnected before session established"));
@@ -815,7 +693,7 @@ void NetworkManager::handleOutgoingSocketError(QAbstractSocket::SocketError sock
     if (!socket) return;
     Q_UNUSED(socketError);
     if (outgoingSocketsAwaitingSessionAccepted.contains(socket)) {
-        QString peerName = outgoingSocketsAwaitingSessionAccepted.value(socket, "Unknown Peer");
+        QString peerName = outgoingSocketsAwaitingSessionAccepted.value(socket).first;
         QString errorString = socket->errorString();
         emit serverStatusMessage(tr("Error on outgoing connection to %1: %2")
                                  .arg(peerName)
@@ -975,4 +853,99 @@ void NetworkManager::removeOutgoingSocketAwaitingAcceptance(QTcpSocket* socket)
     disconnect(socket, &QTcpSocket::readyRead, this, &NetworkManager::handleOutgoingSocketReadyRead);
     disconnect(socket, &QTcpSocket::disconnected, this, &NetworkManager::handleOutgoingSocketDisconnected);
     disconnect(socket, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::errorOccurred), this, &NetworkManager::handleOutgoingSocketError);
+}
+
+// New private helper method
+QString NetworkManager::getDiscoveryMessageValue(const QStringList& parts, const QString& key) const {
+    QString searchKey = key + "=";
+    for (const QString& part : parts) {
+        if (part.startsWith(searchKey)) {
+            return part.mid(searchKey.length());
+        }
+    }
+    return QString();
+}
+
+// New private helper method
+void NetworkManager::cleanupTemporaryUdpResponseListener() {
+    if (udpResponseListenerTimer && udpResponseListenerTimer->isActive()) {
+        udpResponseListenerTimer->stop();
+    }
+    if (udpTemporaryResponseListenerSocket) {
+        qDebug() << "NM::cleanupTemporaryUdpResponseListener: Cleaning up temporary UDP response listener socket.";
+        disconnect(udpTemporaryResponseListenerSocket, nullptr, nullptr, nullptr);
+        udpTemporaryResponseListenerSocket->close();
+        udpTemporaryResponseListenerSocket->deleteLater();
+        udpTemporaryResponseListenerSocket = nullptr;
+    }
+}
+
+// New slot implementation
+void NetworkManager::processUdpResponseToNeed() {
+    if (!udpTemporaryResponseListenerSocket) return;
+
+    qDebug() << "NM::processUdpResponseToNeed: Data received on temporary listener.";
+    if (udpResponseListenerTimer->isActive()) {
+        udpResponseListenerTimer->stop();
+    }
+
+    while (udpTemporaryResponseListenerSocket->hasPendingDatagrams()) {
+        QByteArray datagram;
+        datagram.resize(udpTemporaryResponseListenerSocket->pendingDatagramSize());
+        QHostAddress senderAddress;
+        quint16 senderUdpPort; // Port the REQNEED came from, not necessarily useful here
+
+        udpTemporaryResponseListenerSocket->readDatagram(datagram.data(), datagram.size(), &senderAddress, &senderUdpPort);
+        QString message = QString::fromUtf8(datagram);
+        qDebug() << "NM::processUdpResponseToNeed: Received from" << senderAddress.toString() << ":" << senderUdpPort << "Data:" << message;
+
+        QStringList parts = message.split(';', Qt::SkipEmptyParts);
+        if (parts.isEmpty()) {
+            qWarning() << "NM::processUdpResponseToNeed: Empty or malformed message:" << message;
+            continue;
+        }
+        QString messageType = parts[0];
+        if (messageType == UDP_RESPONSE_TO_NEED_PREFIX) { // Received REQNEED
+            QString peerUuid = getDiscoveryMessageValue(parts, "UUID");
+            QString peerNameHint = getDiscoveryMessageValue(parts, "Name");
+            bool ok;
+            quint16 peerTcpPort = getDiscoveryMessageValue(parts, "TCPPort").toUShort(&ok);
+
+            if (peerUuid.isEmpty() || !ok || peerTcpPort == 0) {
+                qWarning() << "NM::processUdpResponseToNeed: Invalid REQNEED message:" << message;
+                continue;
+            }
+            
+            emit serverStatusMessage(tr("UDP Discovery (REQNEED received on temp port): Peer %1 (UUID: %2) at %3 responded with TCP Port: %4. Attempting TCP connection.")
+                                     .arg(peerNameHint.isEmpty() ? peerUuid : peerNameHint)
+                                     .arg(peerUuid)
+                                     .arg(senderAddress.toString())
+                                     .arg(peerTcpPort));
+            connectToHost(peerNameHint.isEmpty() ? peerUuid : peerNameHint, peerUuid, senderAddress.toString(), peerTcpPort);
+            
+            // Assuming one REQNEED is sufficient, cleanup immediately.
+            // If multiple responses could arrive for one NEED, this logic would need adjustment.
+            cleanupTemporaryUdpResponseListener(); 
+            return; // Processed one REQNEED, exit loop and function
+        } else {
+            qWarning() << "NM::processUdpResponseToNeed: Expected REQNEED, got:" << messageType;
+        }
+    }
+}
+
+// New slot implementation
+void NetworkManager::handleUdpResponseListenerTimeout() {
+    qDebug() << "NM::handleUdpResponseListenerTimeout: Timeout waiting for REQNEED on temporary port.";
+    emit serverStatusMessage(tr("UDP Discovery: Timeout waiting for a direct response to our NEED request."));
+    cleanupTemporaryUdpResponseListener();
+}
+
+// New slot implementation
+void NetworkManager::handleTemporaryUdpSocketError(QAbstractSocket::SocketError socketError) {
+    Q_UNUSED(socketError);
+    if (udpTemporaryResponseListenerSocket) {
+        qWarning() << "NM::handleTemporaryUdpSocketError: Error on temporary UDP listener socket:" << udpTemporaryResponseListenerSocket->errorString();
+        emit serverStatusMessage(tr("Error on temporary UDP response listener: %1").arg(udpTemporaryResponseListenerSocket->errorString()));
+        cleanupTemporaryUdpResponseListener(); // Cleanup on error
+    }
 }
