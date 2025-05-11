@@ -3,6 +3,7 @@
 
 #include <QDialog>
 #include <QPoint>
+#include <QCheckBox> // 新增：包含 QCheckBox 头文件
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -41,7 +42,10 @@ private:
     QLabel *imageLabel;
     QLineEdit *usernameEdit;
     QLineEdit *passwordEdit;
+    QCheckBox *rememberMeCheckBox; // 新增
+    QLabel *forgotPasswordLabel;   // 新增
     QPushButton *loginButton;
+    QPushButton *signUpButton;     // 新增
     QPushButton *minimizeButton; // New
     QPushButton *closeButton;    // New
     // QLabel *forgotPasswordLabel; // Placeholder

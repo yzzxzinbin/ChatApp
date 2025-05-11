@@ -24,11 +24,10 @@ LoginDialog::LoginDialog(QWidget *parent)
 
     // The shadow has a blurRadius of 25 and a yOffset of 5.
     // We need to make the dialog larger than the containerWidget to accommodate the shadow.
-    // Let's add a margin of approx. 20px around the containerWidget for the shadow.
     // Original containerWidget effective size is 400x490.
     // New Dialog width = 400 (container) + 2 * 20 (margins) = 440
-    // New Dialog height = 490 (container) + 2 * 20 (margins) = 530
-    setFixedSize(440, 500); // Adjusted size to include shadow margin
+    // New Dialog height = 490 (container) + 2 * 20 (margins) + ~40 (for new row) = 570
+    setFixedSize(440, 500); // 增加了高度以容纳新行
 }
 
 LoginDialog::~LoginDialog()
@@ -116,13 +115,40 @@ void LoginDialog::setupUi()
     passwordEdit->setPlaceholderText(tr("Password"));
     passwordEdit->setEchoMode(QLineEdit::Password);
 
+    // 新增：记住密码和忘记密码行
+    QHBoxLayout *optionsLayout = new QHBoxLayout();
+    rememberMeCheckBox = new QCheckBox(tr("Remember me"), formContainer);
+    rememberMeCheckBox->setObjectName("rememberMeCheckBox");
+    
+    forgotPasswordLabel = new QLabel(tr("<a href=\"#\">Forgot password?</a>"), formContainer);
+    forgotPasswordLabel->setObjectName("forgotPasswordLabel");
+    forgotPasswordLabel->setTextFormat(Qt::RichText);
+    forgotPasswordLabel->setTextInteractionFlags(Qt::TextBrowserInteraction); // 使其可点击
+    forgotPasswordLabel->setOpenExternalLinks(false); // 在应用内处理点击
+
+    optionsLayout->addWidget(rememberMeCheckBox);
+    optionsLayout->addStretch();
+    optionsLayout->addWidget(forgotPasswordLabel);
+
+    // 新增：登录和注册按钮行
+    QHBoxLayout *actionButtonsLayout = new QHBoxLayout();
     loginButton = new QPushButton(tr("Login"), formContainer);
     loginButton->setObjectName("loginButton");
     loginButton->setFixedHeight(45);
 
+    signUpButton = new QPushButton(tr("Sign Up"), formContainer); // 新增注册按钮
+    signUpButton->setObjectName("signUpButton");
+    signUpButton->setFixedHeight(45);
+
+    actionButtonsLayout->addWidget(loginButton);
+    actionButtonsLayout->addSpacing(15); // 按钮之间的间距
+    actionButtonsLayout->addWidget(signUpButton);
+
     formLayout->addWidget(usernameEdit);
     formLayout->addWidget(passwordEdit);
-    formLayout->addWidget(loginButton);
+    formLayout->addLayout(optionsLayout); // 添加选项行
+    formLayout->addSpacing(10);           // 选项行和按钮行之间的间距
+    formLayout->addLayout(actionButtonsLayout); // 添加操作按钮行
     formLayout->addStretch();
 
     containerLayout->addWidget(formContainer, 1);
@@ -162,6 +188,34 @@ void LoginDialog::applyStyles()
             border: none; 
             padding: 0; 
             margin: 0; 
+        }
+
+        QCheckBox#rememberMeCheckBox {
+            color: #555555; /* 与标签文本颜色一致 */
+            font-size: 13px;
+        }
+        QCheckBox#rememberMeCheckBox::indicator {
+            width: 16px;
+            height: 16px;
+            border: 1px solid #dcdde1;
+            border-radius: 4px;
+            background-color: #f0f0f2;
+        }
+        QCheckBox#rememberMeCheckBox::indicator:checked {
+            background-color: #0078d4; /* 选中时颜色与主按钮一致 */
+            image: url(:/icons/check_mark.svg); /* 可选：自定义勾选图标 */
+        }
+        QCheckBox#rememberMeCheckBox::indicator:hover {
+            border: 1px solid #0078d4;
+        }
+
+        QLabel#forgotPasswordLabel {
+            color: #0078d4; /* 链接颜色 */
+            font-size: 13px;
+            text-decoration: none; /* 默认无下划线 */
+        }
+        QLabel#forgotPasswordLabel:hover {
+            text-decoration: underline; /* 悬停时有下划线 */
         }
 
         QPushButton#minimizeButton, QPushButton#closeButton {
@@ -229,6 +283,23 @@ void LoginDialog::applyStyles()
         }
         QPushButton#loginButton:pressed {
             background-color: #004578; /* Even darker blue */
+        }
+
+        /* 注册按钮样式 - 次要按钮风格 */
+        QPushButton#signUpButton {
+            background-color: #f0f0f2; /* Light grey background, similar to QLineEdit */
+            color: #2f3542; /* Dark grey text */
+            border: 1px solid #dcdde1; /* Light border */
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+        }
+        QPushButton#signUpButton:hover {
+            background-color: #e0e0e0; 
+            border-color: #c0c0c0;
+        }
+        QPushButton#signUpButton:pressed {
+            background-color: #d0d0d0;
         }
     )");
 
