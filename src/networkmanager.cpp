@@ -25,11 +25,12 @@ NetworkManager::NetworkManager(QObject *parent)
       udpDiscoveryListenerSocket(nullptr),
       udpBroadcastSenderSocket(nullptr),
       udpTemporaryResponseListenerSocket(nullptr), 
-      udpResponseListenerTimer(nullptr), // Ensure this is also initialized if used before assignment
+      udpResponseListenerTimer(nullptr), 
       defaultPort(60248),
       preferredListenPort(60248),
       autoStartListeningEnabled(true),
       udpDiscoveryEnabled(false),     
+      currentUdpDiscoveryPort(60249), // Default UDP port
       retryListenTimer(nullptr),
       retryListenIntervalMs(15000),
       preferredOutgoingPortNumber(0),

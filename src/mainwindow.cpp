@@ -42,6 +42,7 @@ MainWindow::MainWindow(QWidget *parent)
       localListenPort(60248),            // 默认监听端口 60248
       autoNetworkListeningEnabled(true), // 新增：默认启用监听
       udpDiscoveryEnabled(true),         // 新增：默认启用UDP发现
+      localUdpDiscoveryPort(60249),      // Added: Default UDP discovery port
       localOutgoingPort(0),              // 默认传出端口为0 (动态)
       useSpecificOutgoingPort(false)     // 默认不指定传出端口
 {
@@ -55,7 +56,7 @@ MainWindow::MainWindow(QWidget *parent)
     networkManager->setLocalUserDetails(localUserUuid, localUserName);
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
-    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled); // 在这里使用加载后的值
+    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
 
     // 2. 然后初始化 ContactManager
     contactManager = new ContactManager(networkManager, this);
@@ -175,6 +176,7 @@ void MainWindow::loadOrCreateUserIdentity()
     localListenPort = settings.value("User/ListenPort", 60248).toUInt();
     autoNetworkListeningEnabled = settings.value("User/AutoNetworkListeningEnabled", true).toBool();
     udpDiscoveryEnabled = settings.value("User/UdpDiscoveryEnabled", true).toBool(); // 加载UDP发现设置
+    localUdpDiscoveryPort = settings.value("User/UdpDiscoveryPort", 60249).toUInt(); // Added: Load UDP port
     localOutgoingPort = settings.value("User/OutgoingPort", 0).toUInt();
     useSpecificOutgoingPort = settings.value("User/UseSpecificOutgoingPort", false).toBool();
     qInfo() << "MW::loadOrCreateUserIdentity: Loaded settings:"
@@ -182,7 +184,8 @@ void MainWindow::loadOrCreateUserIdentity()
             << "UUID:" << localUserUuid
             << "ListenPort:" << localListenPort
             << "AutoNetworkListeningEnabled:" << autoNetworkListeningEnabled
-            << "UdpDiscoveryEnabled:" << udpDiscoveryEnabled // 确保日志中包含
+            << "UdpDiscoveryEnabled:" << udpDiscoveryEnabled 
+            << "UdpDiscoveryPort:" << localUdpDiscoveryPort // Added
             << "OutgoingPort:" << localOutgoingPort
             << "UseSpecificOutgoingPort:" << useSpecificOutgoingPort;
     // 更新NetworkManager的设置，以防它们在settingsDialog之外被更改（例如，首次运行）
@@ -191,7 +194,7 @@ void MainWindow::loadOrCreateUserIdentity()
         networkManager->setLocalUserDetails(localUserUuid, localUserName); // Moved this line here
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
-        networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled); // 确保在这里也调用
+        networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
     }
     qInfo() << "MW::loadOrCreateUserIdentity: Loaded user identity completed:" << localUserName << localUserUuid;
 }
@@ -245,7 +248,8 @@ void MainWindow::onSettingsButtonClicked()
                                             localListenPort,
                                             autoNetworkListeningEnabled,
                                             localOutgoingPort, useSpecificOutgoingPort,
-                                            udpDiscoveryEnabled, // 传递给对话框
+                                            udpDiscoveryEnabled, 
+                                            localUdpDiscoveryPort, // Pass UDP port
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
         connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNow); // 新增连接
@@ -254,7 +258,7 @@ void MainWindow::onSettingsButtonClicked()
     else
     {
         // Update dialog with current settings if it already exists
-        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, autoNetworkListeningEnabled, localOutgoingPort, useSpecificOutgoingPort, udpDiscoveryEnabled); // 更新对话框字段
+        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, autoNetworkListeningEnabled, localOutgoingPort, useSpecificOutgoingPort, udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass UDP port
     }
     settingsDialog->exec(); // 以模态方式显示对话框
 }
@@ -263,7 +267,7 @@ void MainWindow::handleSettingsApplied(const QString &userName,
                                        quint16 listenPort,
                                        bool enableListening,
                                        quint16 outgoingPort, bool useSpecificOutgoingPortVal,
-                                       bool enableUdpDiscovery) // 接收UDP设置
+                                       bool enableUdpDiscovery, quint16 udpDiscoveryPort) // Receive UDP port
 {
     bool settingsChanged = false;
     QSettings settings;
@@ -298,10 +302,12 @@ void MainWindow::handleSettingsApplied(const QString &userName,
     }
 
     // 检查UDP发现启用状态是否改变
-    if (udpDiscoveryEnabled != enableUdpDiscovery)
+    if (udpDiscoveryEnabled != enableUdpDiscovery || localUdpDiscoveryPort != udpDiscoveryPort) // Check port change
     {
         udpDiscoveryEnabled = enableUdpDiscovery;
+        localUdpDiscoveryPort = udpDiscoveryPort; // Store new port
         settings.setValue("User/UdpDiscoveryEnabled", udpDiscoveryEnabled);
+        settings.setValue("User/UdpDiscoveryPort", localUdpDiscoveryPort); // Save new port
         settingsChanged = true;
         udpDiscoveryPrefsChanged = true;
     }
@@ -326,11 +332,11 @@ void MainWindow::handleSettingsApplied(const QString &userName,
     {
         if (networkManager)
         {
-            networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled); // 通知NetworkManager
+            networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
         }
         if (udpDiscoveryEnabled)
         {
-            updateNetworkStatus(tr("UDP Discovery enabled."));
+            updateNetworkStatus(tr("UDP Discovery enabled on port %1.").arg(localUdpDiscoveryPort)); // Show port
         }
         else
         {
@@ -351,15 +357,16 @@ void MainWindow::handleSettingsApplied(const QString &userName,
 
     if (settingsChanged)
     {
-        updateNetworkStatus(tr("Settings applied. User: %1, Listening: %2 (Port: %3), UDP Discovery: %4, Outgoing Port: %5")
+        updateNetworkStatus(tr("Settings applied. User: %1, Listening: %2 (Port: %3), UDP Discovery: %4 (Port: %5), Outgoing Port: %6")
                                 .arg(localUserName)
-                                .arg(autoNetworkListeningEnabled ? tr("Enabled") : tr("Disabled")) // 显示监听状态
+                                .arg(autoNetworkListeningEnabled ? tr("Enabled") : tr("Disabled")) 
                                 .arg(QString::number(localListenPort))
-                                .arg(udpDiscoveryEnabled ? tr("Enabled") : tr("Disabled"))        // 更新状态消息
+                                .arg(udpDiscoveryEnabled ? tr("Enabled") : tr("Disabled"))        
+                                .arg(QString::number(localUdpDiscoveryPort)) // Show UDP port
                                 .arg(useSpecificOutgoingPort && localOutgoingPort > 0 ? QString::number(localOutgoingPort) : tr("Dynamic")));
     }
-    else if (!listeningPrefsChanged)
-    { // 避免在仅重启网络时显示 "unchanged"
+    else if (!listeningPrefsChanged && !udpDiscoveryPrefsChanged) // Also check UDP prefs
+    { 
         updateNetworkStatus(tr("Settings unchanged."));
     }
 }

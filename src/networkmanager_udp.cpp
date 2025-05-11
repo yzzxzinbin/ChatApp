@@ -14,7 +14,7 @@ void NetworkManager::startUdpDiscovery()
 
     if (udpDiscoveryListenerSocket && udpDiscoveryListenerSocket->state() != QAbstractSocket::UnconnectedState)
     {
-        emit serverStatusMessage(tr("UDP discovery is already active on port %1.").arg(DISCOVERY_UDP_PORT));
+        emit serverStatusMessage(tr("UDP discovery is already active on port %1.").arg(currentUdpDiscoveryPort)); // Use member variable
         return;
     }
 
@@ -42,9 +42,9 @@ void NetworkManager::startUdpDiscovery()
         }
         qWarning() << "NM::udpSocket Error:" << errorStr; });
 
-    if (udpDiscoveryListenerSocket->bind(QHostAddress::AnyIPv4, DISCOVERY_UDP_PORT, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint))
+    if (udpDiscoveryListenerSocket->bind(QHostAddress::AnyIPv4, currentUdpDiscoveryPort, QUdpSocket::ShareAddress | QUdpSocket::ReuseAddressHint)) // Use member variable
     {
-        emit serverStatusMessage(tr("UDP discovery started, listening for broadcasts on port %1.").arg(DISCOVERY_UDP_PORT));
+        emit serverStatusMessage(tr("UDP discovery started, listening for broadcasts on port %1.").arg(currentUdpDiscoveryPort)); // Use member variable
 
         // Ensure broadcast sender socket is also initialized
         if (!udpBroadcastSenderSocket)
@@ -61,7 +61,7 @@ void NetworkManager::startUdpDiscovery()
     }
     else
     {
-        emit serverStatusMessage(tr("UDP discovery could not start on port %1: %2").arg(DISCOVERY_UDP_PORT).arg(udpDiscoveryListenerSocket->errorString()));
+        emit serverStatusMessage(tr("UDP discovery could not start on port %1: %2").arg(currentUdpDiscoveryPort).arg(udpDiscoveryListenerSocket->errorString())); // Use member variable
         qWarning() << "NM::startUdpDiscovery: Failed to bind UDP listener socket:" << udpDiscoveryListenerSocket->errorString();
         if (udpDiscoveryListenerSocket)
         { // Clean up failed socket
@@ -217,7 +217,7 @@ void NetworkManager::sendUdpBroadcast()
 
     QByteArray datagram = messageStr.toUtf8();
     // Use udpBroadcastSenderSocket for writing
-    qint64 bytesSent = udpBroadcastSenderSocket->writeDatagram(datagram, QHostAddress::Broadcast, DISCOVERY_UDP_PORT);
+    qint64 bytesSent = udpBroadcastSenderSocket->writeDatagram(datagram, QHostAddress::Broadcast, currentUdpDiscoveryPort); // Use member variable
 
     if (bytesSent == -1)
     {
@@ -356,7 +356,7 @@ void NetworkManager::processPendingUdpDatagrams()
                 qDebug() << "NM::processPendingUdpDatagrams (Responding to NEED): Sending REQNEED to"
                          << senderAddress.toString() << ":" << targetUdpPort << "Data:" << responseMsg;
 
-                if (udpBroadcastSenderSocket->writeDatagram(responseDatagram, senderAddress, targetUdpPort) == -1)
+                if (udpBroadcastSenderSocket->writeDatagram(responseDatagram, senderAddress, targetUdpPort) == -1) // targetUdpPort is correct here
                 {
                     qWarning() << "NM::processPendingUdpDatagrams: Failed to send REQNEED to" << senderAddress.toString() << ":" << targetUdpPort << "Error:" << udpBroadcastSenderSocket->errorString();
                 }
@@ -392,32 +392,6 @@ void NetworkManager::processPendingUdpDatagrams()
         {
             qWarning() << "NM::processPendingUdpDatagrams: Unknown UDP message type:" << messageType << "Full message:" << message;
         }
-    }
-}
-
-void NetworkManager::setUdpDiscoveryPreferences(bool enabled)
-{
-    if (udpDiscoveryEnabled == enabled)
-        return;
-
-    udpDiscoveryEnabled = enabled;
-    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled");
-    if (udpDiscoveryEnabled)
-    {
-        startUdpDiscovery();
-        if (udpBroadcastTimer && !udpBroadcastTimer->isActive())
-        { // Start periodic broadcast if enabled
-            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        }
-    }
-    else
-    {
-        stopUdpDiscovery();
-        if (udpBroadcastTimer && udpBroadcastTimer->isActive())
-        { // Stop periodic broadcast
-            udpBroadcastTimer->stop();
-        }
-        cleanupTemporaryUdpResponseListener(); // Also cleanup if discovery is disabled
     }
 }
 
@@ -519,3 +493,34 @@ void NetworkManager::handleTemporaryUdpSocketError(QAbstractSocket::SocketError 
         cleanupTemporaryUdpResponseListener(); // Cleanup on error
     }
 }
+
+void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port)
+{
+    bool portChanged = (currentUdpDiscoveryPort != port);
+    bool enabledChanged = (udpDiscoveryEnabled != enabled);
+
+    if (!enabledChanged && !portChanged) return;
+
+    udpDiscoveryEnabled = enabled;
+    currentUdpDiscoveryPort = port;
+
+    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled") << "on port" << currentUdpDiscoveryPort;
+
+    if (udpDiscoveryEnabled) {
+        // If port changed, need to stop and restart with new port
+        if (portChanged && udpDiscoveryListenerSocket && udpDiscoveryListenerSocket->state() != QAbstractSocket::UnconnectedState) {
+            stopUdpDiscovery(); // Stop existing discovery first
+        }
+        startUdpDiscovery(); 
+        if (udpBroadcastTimer && !udpBroadcastTimer->isActive()) { 
+            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
+        }
+    } else {
+        stopUdpDiscovery();
+        if (udpBroadcastTimer && udpBroadcastTimer->isActive()) { 
+            udpBroadcastTimer->stop();
+        }
+        cleanupTemporaryUdpResponseListener(); 
+    }
+}
+

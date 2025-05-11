@@ -115,6 +115,7 @@ private:
     quint16 localListenPort;
     bool autoNetworkListeningEnabled; // 新增：用户是否启用了网络监听
     bool udpDiscoveryEnabled;         // 新增：用户是否启用了UDP发现
+    quint16 localUdpDiscoveryPort;      // Added
     quint16 localOutgoingPort;
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
@@ -137,7 +138,7 @@ private slots:
                                quint16 listenPort,
                                bool enableListening, // 新增
                                quint16 outgoingPort, bool useSpecificOutgoingPort,
-                               bool enableUdpDiscovery); // 新增：处理UDP设置
+                               bool enableUdpDiscovery, quint16 udpDiscoveryPort); // Added udpDiscoveryPort
     void handleRetryListenNow(); // 新增槽函数
     void handleManualUdpBroadcastRequested(); // 新增槽
 

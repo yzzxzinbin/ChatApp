@@ -12,8 +12,7 @@
 #include <QUdpSocket> // 用于UDP发现
 
 // UDP发现相关常量
-const quint16 DISCOVERY_UDP_PORT = 60249; // UDP广播和监听的端口
-const int UDP_BROADCAST_INTERVAL_MS = 5000; // 5秒广播一次
+const int DEFAULT_UDP_BROADCAST_INTERVAL_MS = 5000; // 默认5秒广播一次,重命名以示区分
 const QString UDP_DISCOVERY_MSG_PREFIX = "CHAT_DISCOVERY_V1"; // For ANNOUNCE
 const QString UDP_NEED_CONNECTION_PREFIX = "CHAT_NEED_CONN_V1"; // For NEED
 const QString UDP_RESPONSE_TO_NEED_PREFIX = "CHAT_RESP_NEED_V1"; // For REQNEED (Response to NEED)
@@ -61,12 +60,8 @@ public:
     QString getLastError() const;
 
     void setLocalUserDetails(const QString& uuid, const QString& displayName);
-
-    // 新增：设置UDP发现首选项
-    void setUdpDiscoveryPreferences(bool enabled);
-    // 新增：启动UDP发现
+    void setUdpDiscoveryPreferences(bool enabled, quint16 port, bool continuousBroadcast, int intervalSeconds); // 修改签名
     void startUdpDiscovery();
-    // 新增：停止UDP发现
     void stopUdpDiscovery();
 
 signals:
@@ -163,11 +158,14 @@ private:
     QString localUserUuid;
     QString localUserDisplayName;
 
-    bool autoStartListeningEnabled; // 新增：用户是否启用了监听
-    bool udpDiscoveryEnabled;       // 新增：用户是否启用了UDP发现
-    QTimer *retryListenTimer;       // 新增：重试监听的计时器
-    QTimer *udpBroadcastTimer;      // 新增：声明udpBroadcastTimer
-    int retryListenIntervalMs;      // 新增：重试间隔
+    bool autoStartListeningEnabled;
+    bool udpDiscoveryEnabled;
+    quint16 currentUdpDiscoveryPort;
+    bool continuousUdpBroadcastEnabled; // 新增
+    int currentUdpBroadcastIntervalMs; // 新增 (stores interval in ms)
+    QTimer *retryListenTimer;
+    QTimer *udpBroadcastTimer;
+    int retryListenIntervalMs;
 
     void setupServer();
     void cleanupSocket(QTcpSocket* socket, bool removeFromConnectedSockets = true);
