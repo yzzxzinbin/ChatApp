@@ -4,11 +4,6 @@
 #include <QRegularExpression> // For parsing
 #include <QDebug> // Ensure QDebug is included
 
-// Define system message constants and formats
-const QString SYS_MSG_HELLO_FORMAT = QStringLiteral("<SYS_HELLO UUID=\"%1\" NameHint=\"%2\"/>");
-const QString SYS_MSG_SESSION_ACCEPTED_FORMAT = QStringLiteral("<SYS_SESSION_ACCEPTED UUID=\"%1\" Name=\"%2\"/>");
-const QString SYS_MSG_SESSION_REJECTED_FORMAT = QStringLiteral("<SYS_SESSION_REJECTED Reason=\"%1\"/>"); // New
-
 // Helper function to extract attribute from simple XML-like string
 QString extractAttribute(const QString& message, const QString& attributeName) {
     QRegularExpression regex(QStringLiteral("%1=\\\"([^\\\"]*)\\\"").arg(attributeName));
@@ -31,6 +26,8 @@ NetworkManager::NetworkManager(QObject *parent)
       autoStartListeningEnabled(true),
       udpDiscoveryEnabled(false),     
       currentUdpDiscoveryPort(60249), // Default UDP port
+      udpContinuousBroadcastEnabled(true), // Added: Default to true
+      udpBroadcastIntervalSeconds(DEFAULT_UDP_BROADCAST_INTERVAL_SECONDS), // Added: Use default
       retryListenTimer(nullptr),
       retryListenIntervalMs(15000),
       preferredOutgoingPortNumber(0),
@@ -406,7 +403,6 @@ void NetworkManager::setOutgoingConnectionPreferences(quint16 port, bool useSpec
                              .arg(port == 0 ? tr("Dynamic") : QString::number(port))
                              .arg(useSpecific ? tr("Yes") : tr("No")));
 }
-
 
 void NetworkManager::onNewConnection()
 {

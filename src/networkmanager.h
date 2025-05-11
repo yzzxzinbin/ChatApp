@@ -11,8 +11,13 @@
 #include <QTimer> // QTimer for retryListenTimer
 #include <QUdpSocket> // 用于UDP发现
 
+// Define system message constants and formats
+const QString SYS_MSG_HELLO_FORMAT = QStringLiteral("<SYS_HELLO UUID=\"%1\" NameHint=\"%2\"/>");
+const QString SYS_MSG_SESSION_ACCEPTED_FORMAT = QStringLiteral("<SYS_SESSION_ACCEPTED UUID=\"%1\" Name=\"%2\"/>");
+const QString SYS_MSG_SESSION_REJECTED_FORMAT = QStringLiteral("<SYS_SESSION_REJECTED Reason=\"%1\"/>"); // New
+
 // UDP发现相关常量
-const int DEFAULT_UDP_BROADCAST_INTERVAL_MS = 5000; // 默认5秒广播一次,重命名以示区分
+const int DEFAULT_UDP_BROADCAST_INTERVAL_SECONDS = 5; // 默认5秒广播一次
 const QString UDP_DISCOVERY_MSG_PREFIX = "CHAT_DISCOVERY_V1"; // For ANNOUNCE
 const QString UDP_NEED_CONNECTION_PREFIX = "CHAT_NEED_CONN_V1"; // For NEED
 const QString UDP_RESPONSE_TO_NEED_PREFIX = "CHAT_RESP_NEED_V1"; // For REQNEED (Response to NEED)
@@ -60,7 +65,8 @@ public:
     QString getLastError() const;
 
     void setLocalUserDetails(const QString& uuid, const QString& displayName);
-    void setUdpDiscoveryPreferences(bool enabled, quint16 port, bool continuousBroadcast, int intervalSeconds); // 修改签名
+    void setUdpDiscoveryPreferences(bool enabled, quint16 port); // 保留旧方法以向后兼容
+    void setUdpDiscoveryPreferences(bool enabled, quint16 port, bool continuousBroadcast, int broadcastIntervalSeconds); // 新增：具有所有参数的方法
     void startUdpDiscovery();
     void stopUdpDiscovery();
 
@@ -160,9 +166,9 @@ private:
 
     bool autoStartListeningEnabled;
     bool udpDiscoveryEnabled;
-    quint16 currentUdpDiscoveryPort;
-    bool continuousUdpBroadcastEnabled; // 新增
-    int currentUdpBroadcastIntervalMs; // 新增 (stores interval in ms)
+    quint16 currentUdpDiscoveryPort; // 新增：当前UDP发现端口
+    bool udpContinuousBroadcastEnabled; // 新增：是否启用连续广播
+    int udpBroadcastIntervalSeconds; // 新增：广播间隔秒数
     QTimer *retryListenTimer;
     QTimer *udpBroadcastTimer;
     int retryListenIntervalMs;

@@ -116,6 +116,8 @@ private:
     bool autoNetworkListeningEnabled; // 新增：用户是否启用了网络监听
     bool udpDiscoveryEnabled;         // 新增：用户是否启用了UDP发现
     quint16 localUdpDiscoveryPort;      // Added
+    bool udpContinuousBroadcastEnabled; // Added
+    int udpBroadcastIntervalSeconds;    // Added
     quint16 localOutgoingPort;
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
@@ -138,7 +140,8 @@ private slots:
                                quint16 listenPort,
                                bool enableListening, // 新增
                                quint16 outgoingPort, bool useSpecificOutgoingPort,
-                               bool enableUdpDiscovery, quint16 udpDiscoveryPort); // Added udpDiscoveryPort
+                               bool enableUdpDiscovery, quint16 udpDiscoveryPort,
+                               bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
     void handleRetryListenNow(); // 新增槽函数
     void handleManualUdpBroadcastRequested(); // 新增槽
 

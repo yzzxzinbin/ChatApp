@@ -42,7 +42,9 @@ MainWindow::MainWindow(QWidget *parent)
       localListenPort(60248),            // 默认监听端口 60248
       autoNetworkListeningEnabled(true), // 新增：默认启用监听
       udpDiscoveryEnabled(true),         // 新增：默认启用UDP发现
-      localUdpDiscoveryPort(60249),      // Added: Default UDP discovery port
+      localUdpDiscoveryPort(60249),      // Default UDP discovery port
+      udpContinuousBroadcastEnabled(true), // Added: 默认启用持续广播
+      udpBroadcastIntervalSeconds(5),    // Added: 默认5秒间隔
       localOutgoingPort(0),              // 默认传出端口为0 (动态)
       useSpecificOutgoingPort(false)     // 默认不指定传出端口
 {
@@ -56,7 +58,7 @@ MainWindow::MainWindow(QWidget *parent)
     networkManager->setLocalUserDetails(localUserUuid, localUserName);
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
-    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
+    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds); // Updated: pass all parameters
 
     // 2. 然后初始化 ContactManager
     contactManager = new ContactManager(networkManager, this);
@@ -176,25 +178,32 @@ void MainWindow::loadOrCreateUserIdentity()
     localListenPort = settings.value("User/ListenPort", 60248).toUInt();
     autoNetworkListeningEnabled = settings.value("User/AutoNetworkListeningEnabled", true).toBool();
     udpDiscoveryEnabled = settings.value("User/UdpDiscoveryEnabled", true).toBool(); // 加载UDP发现设置
-    localUdpDiscoveryPort = settings.value("User/UdpDiscoveryPort", 60249).toUInt(); // Added: Load UDP port
+    localUdpDiscoveryPort = settings.value("User/UdpDiscoveryPort", 60249).toUInt(); // Load UDP port
+    udpContinuousBroadcastEnabled = settings.value("User/UdpContinuousBroadcastEnabled", true).toBool(); // Added: 加载持续广播设置
+    udpBroadcastIntervalSeconds = settings.value("User/UdpBroadcastIntervalSeconds", 5).toInt(); // Added: 加载广播间隔
+    if (udpBroadcastIntervalSeconds <= 0) udpBroadcastIntervalSeconds = 5; // 确保值为正数
     localOutgoingPort = settings.value("User/OutgoingPort", 0).toUInt();
     useSpecificOutgoingPort = settings.value("User/UseSpecificOutgoingPort", false).toBool();
+    
     qInfo() << "MW::loadOrCreateUserIdentity: Loaded settings:"
             << "UserName:" << localUserName
             << "UUID:" << localUserUuid
             << "ListenPort:" << localListenPort
             << "AutoNetworkListeningEnabled:" << autoNetworkListeningEnabled
             << "UdpDiscoveryEnabled:" << udpDiscoveryEnabled 
-            << "UdpDiscoveryPort:" << localUdpDiscoveryPort // Added
+            << "UdpDiscoveryPort:" << localUdpDiscoveryPort
+            << "UdpContinuousBroadcastEnabled:" << udpContinuousBroadcastEnabled // Added
+            << "UdpBroadcastIntervalSeconds:" << udpBroadcastIntervalSeconds // Added
             << "OutgoingPort:" << localOutgoingPort
             << "UseSpecificOutgoingPort:" << useSpecificOutgoingPort;
+    
     // 更新NetworkManager的设置，以防它们在settingsDialog之外被更改（例如，首次运行）
     if (networkManager)
     {
         networkManager->setLocalUserDetails(localUserUuid, localUserName); // Moved this line here
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
         networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
-        networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
+        networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds); // Updated: pass all parameters
     }
     qInfo() << "MW::loadOrCreateUserIdentity: Loaded user identity completed:" << localUserName << localUserUuid;
 }
@@ -249,7 +258,9 @@ void MainWindow::onSettingsButtonClicked()
                                             autoNetworkListeningEnabled,
                                             localOutgoingPort, useSpecificOutgoingPort,
                                             udpDiscoveryEnabled, 
-                                            localUdpDiscoveryPort, // Pass UDP port
+                                            localUdpDiscoveryPort,
+                                            udpContinuousBroadcastEnabled, // Added: pass continuous broadcast setting
+                                            udpBroadcastIntervalSeconds, // Added: pass broadcast interval
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
         connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNow); // 新增连接
@@ -258,7 +269,10 @@ void MainWindow::onSettingsButtonClicked()
     else
     {
         // Update dialog with current settings if it already exists
-        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, autoNetworkListeningEnabled, localOutgoingPort, useSpecificOutgoingPort, udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass UDP port
+        settingsDialog->updateFields(localUserName, localUserUuid, localListenPort, autoNetworkListeningEnabled, 
+                                    localOutgoingPort, useSpecificOutgoingPort, 
+                                    udpDiscoveryEnabled, localUdpDiscoveryPort,
+                                    udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds); // Updated: pass all parameters
     }
     settingsDialog->exec(); // 以模态方式显示对话框
 }
@@ -267,7 +281,8 @@ void MainWindow::handleSettingsApplied(const QString &userName,
                                        quint16 listenPort,
                                        bool enableListening,
                                        quint16 outgoingPort, bool useSpecificOutgoingPortVal,
-                                       bool enableUdpDiscovery, quint16 udpDiscoveryPort) // Receive UDP port
+                                       bool enableUdpDiscovery, quint16 udpDiscoveryPort,
+                                       bool enableContinuousUdpBroadcast, int udpBroadcastInterval) // Updated: receive new parameters
 {
     bool settingsChanged = false;
     QSettings settings;
@@ -301,13 +316,22 @@ void MainWindow::handleSettingsApplied(const QString &userName,
         listeningPrefsChanged = true;
     }
 
-    // 检查UDP发现启用状态是否改变
-    if (udpDiscoveryEnabled != enableUdpDiscovery || localUdpDiscoveryPort != udpDiscoveryPort) // Check port change
+    // 检查UDP发现启用状态、端口、持续广播或间隔是否改变
+    if (udpDiscoveryEnabled != enableUdpDiscovery || 
+        localUdpDiscoveryPort != udpDiscoveryPort || 
+        udpContinuousBroadcastEnabled != enableContinuousUdpBroadcast || // Added: check continuous setting change
+        udpBroadcastIntervalSeconds != udpBroadcastInterval) // Added: check interval change
     {
         udpDiscoveryEnabled = enableUdpDiscovery;
         localUdpDiscoveryPort = udpDiscoveryPort; // Store new port
+        udpContinuousBroadcastEnabled = enableContinuousUdpBroadcast; // Added: store new continuous setting
+        udpBroadcastIntervalSeconds = udpBroadcastInterval > 0 ? udpBroadcastInterval : 5; // Added: store new interval, ensure positive
+        
         settings.setValue("User/UdpDiscoveryEnabled", udpDiscoveryEnabled);
-        settings.setValue("User/UdpDiscoveryPort", localUdpDiscoveryPort); // Save new port
+        settings.setValue("User/UdpDiscoveryPort", localUdpDiscoveryPort); // Save port
+        settings.setValue("User/UdpContinuousBroadcastEnabled", udpContinuousBroadcastEnabled); // Added: save continuous setting
+        settings.setValue("User/UdpBroadcastIntervalSeconds", udpBroadcastIntervalSeconds); // Added: save interval
+        
         settingsChanged = true;
         udpDiscoveryPrefsChanged = true;
     }
@@ -332,11 +356,20 @@ void MainWindow::handleSettingsApplied(const QString &userName,
     {
         if (networkManager)
         {
-            networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort); // Pass port
+            networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, 
+                                                       udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds); // Updated: pass all parameters
         }
+        
+        // 更新状态信息，包含持续广播和间隔信息
         if (udpDiscoveryEnabled)
         {
-            updateNetworkStatus(tr("UDP Discovery enabled on port %1.").arg(localUdpDiscoveryPort)); // Show port
+            QString status = tr("UDP Discovery enabled on port %1.").arg(localUdpDiscoveryPort);
+            if (udpContinuousBroadcastEnabled) {
+                status += tr(" Continuous broadcast every %1 seconds.").arg(udpBroadcastIntervalSeconds);
+            } else {
+                status += tr(" Continuous broadcast disabled.");
+            }
+            updateNetworkStatus(status);
         }
         else
         {
@@ -357,12 +390,14 @@ void MainWindow::handleSettingsApplied(const QString &userName,
 
     if (settingsChanged)
     {
-        updateNetworkStatus(tr("Settings applied. User: %1, Listening: %2 (Port: %3), UDP Discovery: %4 (Port: %5), Outgoing Port: %6")
+        updateNetworkStatus(tr("Settings applied. User: %1, Listening: %2 (Port: %3), UDP Discovery: %4 (Port: %5, Continuous: %6, Interval: %7s), Outgoing Port: %8")
                                 .arg(localUserName)
                                 .arg(autoNetworkListeningEnabled ? tr("Enabled") : tr("Disabled")) 
                                 .arg(QString::number(localListenPort))
                                 .arg(udpDiscoveryEnabled ? tr("Enabled") : tr("Disabled"))        
-                                .arg(QString::number(localUdpDiscoveryPort)) // Show UDP port
+                                .arg(QString::number(localUdpDiscoveryPort))
+                                .arg(udpContinuousBroadcastEnabled ? tr("Yes") : tr("No")) // Added: show continuous status
+                                .arg(QString::number(udpBroadcastIntervalSeconds)) // Added: show interval
                                 .arg(useSpecificOutgoingPort && localOutgoingPort > 0 ? QString::number(localOutgoingPort) : tr("Dynamic")));
     }
     else if (!listeningPrefsChanged && !udpDiscoveryPrefsChanged) // Also check UDP prefs

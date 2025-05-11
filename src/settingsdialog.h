@@ -2,9 +2,7 @@
 #define SETTINGSDIALOG_H
 
 #include <QDialog>
-#include <QString>
-#include <QSpinBox>
-#include <QCheckBox>
+#include <QString> 
 
 QT_BEGIN_NAMESPACE
 class QLineEdit;
@@ -29,7 +27,7 @@ public:
                             bool currentUdpDiscoveryEnabled,
                             quint16 currentUdpDiscoveryPort,
                             bool currentContinuousUdpBroadcastEnabled, // Added
-                            int currentBroadcastIntervalSeconds,      // Added
+                            int currentUdpBroadcastInterval,          // Added
                             QWidget *parent = nullptr);
     ~SettingsDialog();
 
@@ -42,13 +40,13 @@ public:
     bool isUdpDiscoveryEnabled() const;
     quint16 getUdpDiscoveryPort() const;
     bool isContinuousUdpBroadcastEnabled() const; // Added
-    int getBroadcastIntervalSeconds() const;      // Added
+    int getUdpBroadcastInterval() const;          // Added
 
     void updateFields(const QString &userName, const QString &uuid,
                       quint16 listenPort, bool enableListening,
                       quint16 outgoingPort, bool useSpecificOutgoing,
                       bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                      bool continuousBroadcast, int intervalSeconds); // Added
+                      bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
 
 signals:
     void settingsApplied(const QString &userName,
@@ -56,7 +54,7 @@ signals:
                          bool enableListening,
                          quint16 outgoingPort, bool useSpecificOutgoing,
                          bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                         bool continuousBroadcast, int intervalSeconds); // Added
+                         bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
     void retryListenNowRequested();
     void manualUdpBroadcastRequested();
 
@@ -67,32 +65,29 @@ private slots:
     void onRetryListenNowClicked();
     void onUdpDiscoveryEnableChanged(bool checked);
     void onManualBroadcastClicked();
-    void onContinuousUdpBroadcastEnableChanged(bool checked); // Added
+    void onUdpContinuousBroadcastChanged(bool checked); // Added
 
 private:
     void setupUI();
 
     QTabWidget *tabWidget;
 
-    // UI Elements - General Tab
+    // UI Elements - will be placed in tabs
     QLineEdit *userNameEdit;
     QLineEdit *userUuidEdit;
 
-    // UI Elements - Network Tab (TCP)
     QCheckBox *enableListeningCheckBox;
     QSpinBox *listenPortSpinBox;
-    QPushButton *retryListenButton;
+    QPushButton *retryListenButton; 
 
     QCheckBox *specifyOutgoingPortCheckBox;
     QSpinBox *outgoingPortSpinBox;
 
-    // UI Elements - Network Tab (UDP Discovery)
-    QCheckBox *udpDiscoveryCheckBox;
-    QSpinBox *udpDiscoveryPortSpinBox;
-    QCheckBox *continuousUdpBroadcastCheckBox; // Added
-    QSpinBox *broadcastIntervalSpinBox;      // Added
-    QLabel *broadcastIntervalLabel;          // Added for clarity
-    QPushButton *manualBroadcastButton;
+    QCheckBox *udpDiscoveryCheckBox; 
+    QSpinBox *udpDiscoveryPortSpinBox; 
+    QPushButton *manualBroadcastButton; 
+    QCheckBox *enableContinuousUdpBroadcastCheckBox; // Added
+    QSpinBox *udpBroadcastIntervalSpinBox;           // Added
 
     QPushButton *saveButton;
     QPushButton *cancelButton;
@@ -104,10 +99,10 @@ private:
     bool initialAutoListenEnabled;
     quint16 initialOutgoingPort;
     bool initialUseSpecificOutgoing;
-    bool initialUdpDiscoveryEnabled;
-    quint16 initialUdpDiscoveryPort;
+    bool initialUdpDiscoveryEnabled; 
+    quint16 initialUdpDiscoveryPort; 
     bool initialContinuousUdpBroadcastEnabled; // Added
-    int initialBroadcastIntervalSeconds;      // Added
+    int initialUdpBroadcastInterval;           // Added
 };
 
 #endif // SETTINGSDIALOG_H

@@ -52,12 +52,21 @@ void NetworkManager::startUdpDiscovery()
             udpBroadcastSenderSocket = new QUdpSocket(this);
             // No bind needed for sender usually, unless specific interface or port is required for sending from.
         }
-        // Start periodic broadcast timer if not already running and discovery is enabled
-        if (udpDiscoveryEnabled && udpBroadcastTimer && !udpBroadcastTimer->isActive())
-        {
-            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        }
+        
         sendUdpBroadcast(); // Send initial broadcast upon successful start
+
+        // Start periodic broadcast timer if discovery and continuous broadcast are enabled
+        if (udpDiscoveryEnabled && udpContinuousBroadcastEnabled && udpBroadcastTimer)
+        {
+            if (udpBroadcastTimer->isActive()) udpBroadcastTimer->stop(); // Stop if already running with old interval
+            udpBroadcastTimer->start(udpBroadcastIntervalSeconds * 1000); // Use seconds
+            qDebug() << "NM::startUdpDiscovery: Continuous broadcast timer started with interval:" << udpBroadcastIntervalSeconds << "s";
+        }
+        else if (udpBroadcastTimer && udpBroadcastTimer->isActive())
+        {
+            udpBroadcastTimer->stop(); // Stop if not continuous
+            qDebug() << "NM::startUdpDiscovery: Continuous broadcast disabled, timer stopped.";
+        }
     }
     else
     {
@@ -105,7 +114,7 @@ void NetworkManager::stopUdpDiscovery()
     {
         qDebug() << "NM::stopUdpDiscovery: udpBroadcastSenderSocket is already null.";
     }
-    if (udpDiscoveryListenerSocket || udpBroadcastSenderSocket)
+    if (udpDiscoveryListenerSocket || udpBroadcastSenderSocket || (udpBroadcastTimer && udpBroadcastTimer->isActive())) // check timer too
     {
         emit serverStatusMessage(tr("UDP discovery stopped."));
     }
@@ -156,8 +165,10 @@ void NetworkManager::sendUdpBroadcast()
             qDebug() << "NM::sendUdpBroadcast: Attempting to re-initialize UDP sockets via startUdpDiscovery.";
             startUdpDiscovery(); // This itself calls sendUdpBroadcast() upon success
             // Check again after attempt to start
-            if (!udpDiscoveryListenerSocket || udpDiscoveryListenerSocket->state() == QAbstractSocket::UnconnectedState || !udpBroadcastSenderSocket)
-                return; // If still not ready, exit
+            if (!udpDiscoveryListenerSocket || udpDiscoveryListenerSocket->state() == QAbstractSocket::UnconnectedState || !udpBroadcastSenderSocket) {
+                 // If still not ready, exit. startUdpDiscovery would have emitted an error.
+                return; 
+            }
         }
         else
         {
@@ -190,7 +201,7 @@ void NetworkManager::sendUdpBroadcast()
             qDebug() << "NM::sendUdpBroadcast (NEED): Temporary listener bound to port" << advertisedReplyToPort;
             if (udpResponseListenerTimer)
             { // Ensure timer exists
-                udpResponseListenerTimer->start(UDP_TEMP_RESPONSE_LISTENER_TIMEOUT_MS);
+                udpResponseListenerTimer->start(UDP_TEMP_RESPONSE_LISTENER_TIMEOUT_MS); // Ensure this constant is defined
             }
         }
         else
@@ -494,33 +505,55 @@ void NetworkManager::handleTemporaryUdpSocketError(QAbstractSocket::SocketError 
     }
 }
 
-void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port)
+void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port, bool continuousBroadcast, int broadcastIntervalSeconds)
 {
     bool portChanged = (currentUdpDiscoveryPort != port);
     bool enabledChanged = (udpDiscoveryEnabled != enabled);
+    bool continuousChanged = (udpContinuousBroadcastEnabled != continuousBroadcast);
+    bool intervalChanged = (udpBroadcastIntervalSeconds != broadcastIntervalSeconds);
 
-    if (!enabledChanged && !portChanged) return;
+    if (!enabledChanged && !portChanged && !continuousChanged && !intervalChanged) return;
+
+    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled")
+             << "on port" << port
+             << "Continuous:" << (continuousBroadcast ? "enabled" : "disabled")
+             << "Interval:" << broadcastIntervalSeconds << "s";
 
     udpDiscoveryEnabled = enabled;
     currentUdpDiscoveryPort = port;
+    udpContinuousBroadcastEnabled = continuousBroadcast;
+    udpBroadcastIntervalSeconds = (broadcastIntervalSeconds > 0) ? broadcastIntervalSeconds : DEFAULT_UDP_BROADCAST_INTERVAL_SECONDS;
 
-    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled") << "on port" << currentUdpDiscoveryPort;
 
     if (udpDiscoveryEnabled) {
-        // If port changed, need to stop and restart with new port
-        if (portChanged && udpDiscoveryListenerSocket && udpDiscoveryListenerSocket->state() != QAbstractSocket::UnconnectedState) {
-            stopUdpDiscovery(); // Stop existing discovery first
+        // If settings changed that require a restart of the listener/timer
+        if (enabledChanged || portChanged || continuousChanged || intervalChanged) {
+            if (udpDiscoveryListenerSocket && udpDiscoveryListenerSocket->state() != QAbstractSocket::UnconnectedState) {
+                 // Stop existing discovery first if it's running, especially if port changed or it's being disabled/reconfigured
+                stopUdpDiscovery(); 
+            }
+            startUdpDiscovery(); // This will handle initial broadcast and timer based on new settings
         }
-        startUdpDiscovery(); 
-        if (udpBroadcastTimer && !udpBroadcastTimer->isActive()) { 
-            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        }
-    } else {
-        stopUdpDiscovery();
-        if (udpBroadcastTimer && udpBroadcastTimer->isActive()) { 
-            udpBroadcastTimer->stop();
-        }
+    } else { // UDP Discovery is being disabled
+        stopUdpDiscovery(); // This stops the listener and the broadcast timer
         cleanupTemporaryUdpResponseListener(); 
+        emit serverStatusMessage(tr("UDP Discovery disabled."));
+    }
+
+    // Emit status based on the new state
+    if (udpDiscoveryEnabled) {
+        QString status = tr("UDP Discovery enabled on port %1.").arg(currentUdpDiscoveryPort);
+        if (udpContinuousBroadcastEnabled) {
+            status += tr(" Continuous broadcast every %1 seconds.").arg(udpBroadcastIntervalSeconds);
+        } else {
+            status += tr(" Continuous broadcast disabled (sends once on start/manual trigger).");
+        }
+        emit serverStatusMessage(status);
     }
 }
-
+// 重载的非完全参数的setUdpDiscoveryPreferences,用于兼容旧版本
+void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port)
+{
+    // Call the new method with all parameters, keeping current continuous broadcast and interval settings
+    setUdpDiscoveryPreferences(enabled, port, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
+}
