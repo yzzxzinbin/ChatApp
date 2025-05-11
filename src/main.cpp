@@ -178,7 +178,7 @@ int main(int argc, char *argv[])
 
     qInstallMessageHandler(customMessageOutput);
 
-    QCoreApplication::setOrganizationName("YourCompany");
+    QCoreApplication::setOrganizationName("CCZU_ZX");
     QCoreApplication::setApplicationName(effectiveAppName); 
 
     QString logFileSuffixForName = instanceSuffix.isEmpty() ? "" : instanceSuffix;

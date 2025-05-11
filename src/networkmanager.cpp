@@ -406,25 +406,6 @@ void NetworkManager::setOutgoingConnectionPreferences(quint16 port, bool useSpec
                              .arg(useSpecific ? tr("Yes") : tr("No")));
 }
 
-void NetworkManager::setUdpDiscoveryPreferences(bool enabled)
-{
-    if (udpDiscoveryEnabled == enabled) return;
-
-    udpDiscoveryEnabled = enabled;
-    qDebug() << "NM::setUdpDiscoveryPreferences: UDP Discovery" << (enabled ? "enabled" : "disabled");
-    if (udpDiscoveryEnabled) {
-        startUdpDiscovery(); 
-        if (udpBroadcastTimer && !udpBroadcastTimer->isActive()) { // Start periodic broadcast if enabled
-            udpBroadcastTimer->start(UDP_BROADCAST_INTERVAL_MS);
-        }
-    } else {
-        stopUdpDiscovery();
-        if (udpBroadcastTimer && udpBroadcastTimer->isActive()) { // Stop periodic broadcast
-            udpBroadcastTimer->stop();
-        }
-        cleanupTemporaryUdpResponseListener(); // Also cleanup if discovery is disabled
-    }
-}
 
 void NetworkManager::onNewConnection()
 {
@@ -864,88 +845,4 @@ QString NetworkManager::getDiscoveryMessageValue(const QStringList& parts, const
         }
     }
     return QString();
-}
-
-// New private helper method
-void NetworkManager::cleanupTemporaryUdpResponseListener() {
-    if (udpResponseListenerTimer && udpResponseListenerTimer->isActive()) {
-        udpResponseListenerTimer->stop();
-    }
-    if (udpTemporaryResponseListenerSocket) {
-        qDebug() << "NM::cleanupTemporaryUdpResponseListener: Cleaning up temporary UDP response listener socket.";
-        disconnect(udpTemporaryResponseListenerSocket, nullptr, nullptr, nullptr);
-        udpTemporaryResponseListenerSocket->close();
-        udpTemporaryResponseListenerSocket->deleteLater();
-        udpTemporaryResponseListenerSocket = nullptr;
-    }
-}
-
-// New slot implementation
-void NetworkManager::processUdpResponseToNeed() {
-    if (!udpTemporaryResponseListenerSocket) return;
-
-    qDebug() << "NM::processUdpResponseToNeed: Data received on temporary listener.";
-    if (udpResponseListenerTimer->isActive()) {
-        udpResponseListenerTimer->stop();
-    }
-
-    while (udpTemporaryResponseListenerSocket->hasPendingDatagrams()) {
-        QByteArray datagram;
-        datagram.resize(udpTemporaryResponseListenerSocket->pendingDatagramSize());
-        QHostAddress senderAddress;
-        quint16 senderUdpPort; // Port the REQNEED came from, not necessarily useful here
-
-        udpTemporaryResponseListenerSocket->readDatagram(datagram.data(), datagram.size(), &senderAddress, &senderUdpPort);
-        QString message = QString::fromUtf8(datagram);
-        qDebug() << "NM::processUdpResponseToNeed: Received from" << senderAddress.toString() << ":" << senderUdpPort << "Data:" << message;
-
-        QStringList parts = message.split(';', Qt::SkipEmptyParts);
-        if (parts.isEmpty()) {
-            qWarning() << "NM::processUdpResponseToNeed: Empty or malformed message:" << message;
-            continue;
-        }
-        QString messageType = parts[0];
-        if (messageType == UDP_RESPONSE_TO_NEED_PREFIX) { // Received REQNEED
-            QString peerUuid = getDiscoveryMessageValue(parts, "UUID");
-            QString peerNameHint = getDiscoveryMessageValue(parts, "Name");
-            bool ok;
-            quint16 peerTcpPort = getDiscoveryMessageValue(parts, "TCPPort").toUShort(&ok);
-
-            if (peerUuid.isEmpty() || !ok || peerTcpPort == 0) {
-                qWarning() << "NM::processUdpResponseToNeed: Invalid REQNEED message:" << message;
-                continue;
-            }
-            
-            emit serverStatusMessage(tr("UDP Discovery (REQNEED received on temp port): Peer %1 (UUID: %2) at %3 responded with TCP Port: %4. Attempting TCP connection.")
-                                     .arg(peerNameHint.isEmpty() ? peerUuid : peerNameHint)
-                                     .arg(peerUuid)
-                                     .arg(senderAddress.toString())
-                                     .arg(peerTcpPort));
-            connectToHost(peerNameHint.isEmpty() ? peerUuid : peerNameHint, peerUuid, senderAddress.toString(), peerTcpPort);
-            
-            // Assuming one REQNEED is sufficient, cleanup immediately.
-            // If multiple responses could arrive for one NEED, this logic would need adjustment.
-            cleanupTemporaryUdpResponseListener(); 
-            return; // Processed one REQNEED, exit loop and function
-        } else {
-            qWarning() << "NM::processUdpResponseToNeed: Expected REQNEED, got:" << messageType;
-        }
-    }
-}
-
-// New slot implementation
-void NetworkManager::handleUdpResponseListenerTimeout() {
-    qDebug() << "NM::handleUdpResponseListenerTimeout: Timeout waiting for REQNEED on temporary port.";
-    emit serverStatusMessage(tr("UDP Discovery: Timeout waiting for a direct response to our NEED request."));
-    cleanupTemporaryUdpResponseListener();
-}
-
-// New slot implementation
-void NetworkManager::handleTemporaryUdpSocketError(QAbstractSocket::SocketError socketError) {
-    Q_UNUSED(socketError);
-    if (udpTemporaryResponseListenerSocket) {
-        qWarning() << "NM::handleTemporaryUdpSocketError: Error on temporary UDP listener socket:" << udpTemporaryResponseListenerSocket->errorString();
-        emit serverStatusMessage(tr("Error on temporary UDP response listener: %1").arg(udpTemporaryResponseListenerSocket->errorString()));
-        cleanupTemporaryUdpResponseListener(); // Cleanup on error
-    }
 }
