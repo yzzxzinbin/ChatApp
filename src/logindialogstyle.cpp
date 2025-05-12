@@ -1,15 +1,23 @@
 #include "logindialog.h"
-#include <QLineEdit>          // 用于 QLineEdit 类
-#include <QPushButton>        // 用于 QPushButton 类
-#include <QGraphicsDropShadowEffect> // 用于阴影效果
-#include <QPainter>           // 用于自定义绘制
-#include <QPainterPath>       // 用于创建圆角路径
-#include <QEvent>             // 用于事件处理
-#include <QIcon>              // 用于按钮图标
-#include <QShowEvent>         // 用于窗口显示事件
-#include <QLabel>             // 用于 QLabel 类
-#include <QPalette>           // 用于调色板设置
-#include <QMessageBox>        // 用于显示消息框（如果用到）
+#include <QLabel>
+#include <QLineEdit>
+#include <QPushButton>
+#include <QVBoxLayout>
+#include <QHBoxLayout>
+#include <QPixmap>
+#include <QMouseEvent>
+#include <QApplication> 
+#include <QGraphicsDropShadowEffect>
+#include <QPainter> 
+#include <QPainterPath> 
+#include <QEvent> 
+#include <QIcon> 
+#include <QSizePolicy> 
+#include <QWidget> 
+#include <QPalette> 
+#include <QVariantAnimation> 
+#include <QTextDocument>     
+#include <QRegularExpression> 
 
 void LoginDialog::applyStyles()
 {
@@ -148,4 +156,208 @@ void LoginDialog::applyStyles()
         fpPalette.setColor(QPalette::WindowText, forgotPasswordNormalColor);
         forgotPasswordLabel->setPalette(fpPalette);
     }
+}
+
+
+void LoginDialog::setupUi()
+{
+    mainLayout = new QVBoxLayout(this);
+    int shadowMargin = 20;
+    mainLayout->setContentsMargins(shadowMargin, shadowMargin, shadowMargin, shadowMargin);
+    mainLayout->setSpacing(0);
+
+    QWidget *containerWidget = new QWidget(this);
+    containerWidget->setObjectName("containerWidget");
+
+    QVBoxLayout *containerLayout = new QVBoxLayout(containerWidget);
+    containerLayout->setContentsMargins(0, 0, 0, 0);
+    containerLayout->setSpacing(0);
+
+    imageLabel = new QLabel(containerWidget);
+    imageLabel->setObjectName("imageLabel");
+    int imageDisplayHeight = 200;
+    QPixmap originalStarterPixmap(":/res/starter.png");
+    if (originalStarterPixmap.isNull())
+    {
+        imageLabel->setText("Image not found (400x200)");
+        imageLabel->setAlignment(Qt::AlignCenter);
+        imageLabel->setStyleSheet("background-color: #555; color: white;");
+    }
+    else
+    {
+        QPixmap scaledPixmap = originalStarterPixmap.scaled(400, imageDisplayHeight, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+        QPixmap roundedPixmap = createRoundedPixmap(scaledPixmap, 15);
+        imageLabel->setPixmap(roundedPixmap);
+    }
+    imageLabel->setFixedHeight(imageDisplayHeight);
+    imageLabel->setAlignment(Qt::AlignCenter);
+    containerLayout->addWidget(imageLabel);
+
+    QWidget *buttonOverlayWidget = new QWidget(imageLabel);
+    buttonOverlayWidget->setAttribute(Qt::WA_TranslucentBackground);
+
+    QHBoxLayout *imageButtonsLayout = new QHBoxLayout(buttonOverlayWidget);
+    imageButtonsLayout->setContentsMargins(0, 5, 5, 0);
+    imageButtonsLayout->setSpacing(5);
+    imageButtonsLayout->addStretch();
+
+    minimizeButton = new QPushButton("—", buttonOverlayWidget);
+    minimizeButton->setObjectName("minimizeButton");
+    minimizeButton->setFixedSize(25, 25);
+
+    closeButton = new QPushButton("✕", buttonOverlayWidget);
+    closeButton->setObjectName("closeButton");
+    closeButton->setFixedSize(25, 25);
+
+    imageButtonsLayout->addWidget(minimizeButton);
+    imageButtonsLayout->addWidget(closeButton);
+
+    QVBoxLayout *imageLabelInternalLayout = new QVBoxLayout(imageLabel);
+    imageLabelInternalLayout->setContentsMargins(0, 0, 0, 0);
+    imageLabelInternalLayout->addWidget(buttonOverlayWidget, 0, Qt::AlignTop);
+    imageLabelInternalLayout->addStretch(1);
+
+    formContainer = new QWidget(containerWidget);
+    formContainer->setObjectName("formContainer");
+    QVBoxLayout *formLayout = new QVBoxLayout(formContainer);
+    formLayout->setContentsMargins(30, 25, 30, 20);
+    formLayout->setSpacing(18);
+
+    usernameEdit = new QLineEdit(formContainer);
+    usernameEdit->setObjectName("usernameEdit");
+    usernameEdit->setPlaceholderText(tr("Username"));
+
+    passwordEdit = new QLineEdit(formContainer);
+    passwordEdit->setObjectName("passwordEdit");
+    passwordEdit->setPlaceholderText(tr("Password"));
+    passwordEdit->setEchoMode(QLineEdit::Password);
+
+    QHBoxLayout *optionsLayout = new QHBoxLayout();
+    rememberMeCheckBox = new QCheckBox(tr("Remember me"), formContainer);
+    rememberMeCheckBox->setObjectName("rememberMeCheckBox");
+
+    QWidget *forgotPasswordInteractiveWidget = new QWidget(formContainer);
+    QVBoxLayout *fpVerticalLayout = new QVBoxLayout(forgotPasswordInteractiveWidget);
+    fpVerticalLayout->setContentsMargins(0, 0, 0, 0);
+    fpVerticalLayout->setSpacing(0);
+
+    forgotPasswordLabel = new QLabel(tr("Forgot password?"), forgotPasswordInteractiveWidget); 
+    forgotPasswordLabel->setObjectName("forgotPasswordLabel");
+    forgotPasswordLabel->setCursor(Qt::PointingHandCursor); // 保持手形光标以指示可交互
+    forgotPasswordLabel->installEventFilter(this);
+
+    QPalette fpPalette = forgotPasswordLabel->palette();
+    fpPalette.setColor(QPalette::WindowText, forgotPasswordNormalColor); // 设置初始文本颜色
+    forgotPasswordLabel->setPalette(fpPalette);
+
+    forgotPasswordUnderlineContainer = new QWidget(forgotPasswordInteractiveWidget);
+    forgotPasswordUnderlineContainer->setFixedHeight(2);
+
+    forgotPasswordUnderline = new QWidget(forgotPasswordUnderlineContainer);
+    forgotPasswordUnderline->setStyleSheet(QString("background-color: %1;").arg(underlineColor.name()));
+    
+    fpVerticalLayout->addWidget(forgotPasswordLabel);
+    fpVerticalLayout->addWidget(forgotPasswordUnderlineContainer);
+    forgotPasswordInteractiveWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+
+    optionsLayout->addWidget(rememberMeCheckBox);
+    optionsLayout->addStretch();
+    optionsLayout->addWidget(forgotPasswordInteractiveWidget);
+
+    QWidget *actionButtonsContainer = new QWidget(formContainer);
+    QHBoxLayout *actionButtonsLayout = new QHBoxLayout(actionButtonsContainer);
+    actionButtonsLayout->setContentsMargins(0, 0, 0, 0);
+    actionButtonsLayout->setSpacing(15);
+
+    loginButton = new QPushButton(actionButtonsContainer);
+    loginButton->setObjectName("loginButton");
+    loginButton->setFixedHeight(45);
+    loginButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+    signUpButton = new QPushButton(actionButtonsContainer);
+    signUpButton->setObjectName("signUpButton");
+    signUpButton->setFixedHeight(45);
+    signUpButton->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+
+    int totalWidthForButtonsContainer = 340;
+    int spacingBetweenButtons = 15;
+    int totalWidthForButtonsOnly = totalWidthForButtonsContainer - spacingBetweenButtons;
+
+    initialLoginWidth = qRound(totalWidthForButtonsOnly * 0.82);
+    initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
+
+    targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
+    targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
+
+    if (initialLoginWidth + initialSignUpWidth != totalWidthForButtonsOnly) {
+        initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
+    }
+    if (targetLoginWidthOnSignUpHover + targetSignUpWidthOnSignUpHover != totalWidthForButtonsOnly) {
+        targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
+        targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
+    }
+
+    loginButton->setFixedWidth(initialLoginWidth);
+    loginButton->setText(tr("Login"));
+    loginButton->setIcon(QIcon());
+
+    signUpButton->setFixedWidth(initialSignUpWidth);
+    signUpButton->setText("");
+    signUpButton->setIcon(QIcon(":/icons/register.svg"));
+    signUpButton->setIconSize(QSize(24, 24));
+
+    actionButtonsLayout->addWidget(loginButton);
+    actionButtonsLayout->addWidget(signUpButton);
+
+    actionButtonsLayout->setStretchFactor(loginButton, 0);
+    actionButtonsLayout->setStretchFactor(signUpButton, 0);
+
+    actionButtonsContainer->setFixedWidth(totalWidthForButtonsContainer);
+
+    formLayout->addWidget(usernameEdit);
+    formLayout->addWidget(passwordEdit);
+    formLayout->addLayout(optionsLayout);
+    formLayout->addSpacing(4);
+    formLayout->addWidget(actionButtonsContainer);
+    formLayout->addStretch();
+
+    containerLayout->addWidget(formContainer, 1);
+
+    QGraphicsDropShadowEffect *shadow = new QGraphicsDropShadowEffect(this);
+    shadow->setBlurRadius(25);
+    shadow->setXOffset(0);
+    shadow->setYOffset(5);
+    shadow->setColor(QColor(0, 0, 0, 100));
+    containerWidget->setGraphicsEffect(shadow);
+
+    mainLayout->addWidget(containerWidget);
+    setLayout(mainLayout);
+
+    buttonWidthAnimationGroup = new QParallelAnimationGroup(this);
+
+    loginMinSizeAnimation = new QPropertyAnimation(loginButton, "minimumWidth", this);
+    loginMinSizeAnimation->setDuration(200);
+    loginMinSizeAnimation->setEasingCurve(QEasingCurve::InOutSine);
+    buttonWidthAnimationGroup->addAnimation(loginMinSizeAnimation);
+
+    loginMaxSizeAnimation = new QPropertyAnimation(loginButton, "maximumWidth", this);
+    loginMaxSizeAnimation->setDuration(200);
+    loginMaxSizeAnimation->setEasingCurve(QEasingCurve::InOutSine);
+    buttonWidthAnimationGroup->addAnimation(loginMaxSizeAnimation);
+
+    signUpMinSizeAnimation = new QPropertyAnimation(signUpButton, "minimumWidth", this);
+    signUpMinSizeAnimation->setDuration(200);
+    signUpMinSizeAnimation->setEasingCurve(QEasingCurve::InOutSine);
+    buttonWidthAnimationGroup->addAnimation(signUpMinSizeAnimation);
+
+    signUpMaxSizeAnimation = new QPropertyAnimation(signUpButton, "maximumWidth", this);
+    signUpMaxSizeAnimation->setDuration(200);
+    signUpMaxSizeAnimation->setEasingCurve(QEasingCurve::InOutSine);
+    buttonWidthAnimationGroup->addAnimation(signUpMaxSizeAnimation);
+
+    signUpButton->installEventFilter(this);
+
+    connect(loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
+    connect(minimizeButton, &QPushButton::clicked, this, &LoginDialog::onMinimizeClicked);
+    connect(closeButton, &QPushButton::clicked, this, &LoginDialog::onCloseClicked);
 }
