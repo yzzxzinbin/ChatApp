@@ -8,6 +8,7 @@
         "filesystem": "cpp",
         "qlabel": "cpp",
         "qgraphicsdropshadoweffect": "cpp",
-        "qpainter": "cpp"
+        "qpainter": "cpp",
+        "qnetworkinterface": "cpp"
     }
 }

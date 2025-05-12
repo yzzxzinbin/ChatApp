@@ -1,5 +1,5 @@
-#ifndef STYLEUTILS_H
-#define STYLEUTILS_H
+#ifndef MAINWINDOWSTYLE_H
+#define MAINWINDOWSTYLE_H
 
 #include <QString>
 
@@ -9,4 +9,4 @@ QString getApplicationStyleSheet();
 
 } // namespace StyleUtils
 
-#endif // STYLEUTILS_H
+#endif // MAINWINDOWSTYLE_H

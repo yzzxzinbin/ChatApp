@@ -62,40 +62,6 @@ LoginDialog::~LoginDialog()
     // }
 }
 
-void LoginDialog::setupUi()
-{
-    mainLayout = new QVBoxLayout(this);
-    int shadowMargin = 20;
-    mainLayout->setContentsMargins(shadowMargin, shadowMargin, shadowMargin, shadowMargin);
-    mainLayout->setSpacing(0);
-
-    QWidget *containerWidget = new QWidget(this);
-    containerWidget->setObjectName("containerWidget");
-
-    QVBoxLayout *containerLayout = new QVBoxLayout(containerWidget);
-    containerLayout->setContentsMargins(0, 0, 0, 0);
-    containerLayout->setSpacing(0);
-
-    imageLabel = new QLabel(containerWidget);
-
-    formContainer = new QWidget(containerWidget);
-    formContainer->setObjectName("formContainer");
-    QVBoxLayout *formLayout = new QVBoxLayout(formContainer);
-    formLayout->setContentsMargins(30, 25, 30, 20);
-    formLayout->setSpacing(18);
-
-    usernameEdit = new QLineEdit(formContainer);
-    usernameEdit->setObjectName("usernameEdit");
-    usernameEdit->setPlaceholderText(tr("User ID (integer)")); // Updated placeholder
-
-    passwordEdit = new QLineEdit(formContainer);
-
-    signUpButton->installEventFilter(this);
-    connect(signUpButton, &QPushButton::clicked, this, &LoginDialog::onSignUpClicked); 
-
-    connect(loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
-}
-
 void LoginDialog::onLoginClicked()
 {
     if (!m_dbManager || !m_dbManager->isConnected()) {
@@ -103,36 +69,25 @@ void LoginDialog::onLoginClicked()
         return;
     }
 
-    QString userIdStr = usernameEdit->text().trimmed(); // This is now User ID string
-    QString password = passwordEdit->text(); 
+    QString username = usernameEdit->text().trimmed();
+    QString password = passwordEdit->text(); // Get password as is
 
-    if (userIdStr.isEmpty() || password.isEmpty()) {
-        QMessageBox::warning(this, tr("Login Failed"), tr("User ID and password cannot be empty."));
+    if (username.isEmpty() || password.isEmpty()) {
+        QMessageBox::warning(this, tr("Login Failed"), tr("Username and password cannot be empty."));
         return;
     }
 
-    bool ok;
-    userIdStr.toInt(&ok); // Check if User ID is a valid integer string
-    if (!ok) {
-        QMessageBox::warning(this, tr("Login Failed"), tr("User ID must be an integer."));
-        usernameEdit->setFocus();
-        return;
-    }
-
-    // DatabaseManager::validateUser now expects userIdStr and handles conversion/validation
-    if (m_dbManager->validateUser(userIdStr, password)) {
-        QMessageBox::information(this, tr("Login Successful"), tr("Welcome, User ID %1!").arg(userIdStr));
+    if (m_dbManager->validateUser(username, password)) {
+        QMessageBox::information(this, tr("Login Successful"), tr("Welcome, %1!").arg(username));
         accept();
     } else {
-        // Check if user ID exists to give a more specific error
-        if (m_dbManager->userExists(userIdStr)) {
-            QMessageBox::warning(this, tr("Login Failed"), tr("Invalid password for User ID '%1'.").arg(userIdStr));
+        // Check if user exists to give a more specific error
+        if (m_dbManager->userExists(username)) {
+            QMessageBox::warning(this, tr("Login Failed"), tr("Invalid password for user '%1'.").arg(username));
         } else {
-            // If validateUser failed due to non-integer ID, errorOccurred signal would have been emitted.
-            // Otherwise, if it's a valid int but not found:
-            QMessageBox::warning(this, tr("Login Failed"), tr("User ID '%1' not found.").arg(userIdStr));
+            QMessageBox::warning(this, tr("Login Failed"), tr("User '%1' not found.").arg(username));
         }
-        passwordEdit->clear(); 
+        passwordEdit->clear(); // Clear password field on failure
         passwordEdit->setFocus();
     }
 }
@@ -144,35 +99,28 @@ void LoginDialog::onSignUpClicked()
         return;
     }
 
-    QString userIdStr = usernameEdit->text().trimmed(); // This is now User ID string
+    QString username = usernameEdit->text().trimmed();
     QString password = passwordEdit->text();
 
-    if (userIdStr.isEmpty() || password.isEmpty()) {
-        QMessageBox::warning(this, tr("Sign Up Failed"), tr("User ID and password cannot be empty."));
+    if (username.isEmpty() || password.isEmpty()) {
+        QMessageBox::warning(this, tr("Sign Up Failed"), tr("Username and password cannot be empty."));
         return;
     }
     
-    bool ok;
-    userIdStr.toInt(&ok); // Check if User ID is a valid integer string
-    if (!ok) {
-        QMessageBox::warning(this, tr("Sign Up Failed"), tr("User ID must be an integer."));
-        usernameEdit->setFocus();
-        return;
-    }
-
-    if (password.length() < 6) { // Basic password length validation
+    // Basic validation (you'd add more robust checks here)
+    if (password.length() < 6) {
         QMessageBox::warning(this, tr("Sign Up Failed"), tr("Password must be at least 6 characters long."));
         return;
     }
 
-    // DatabaseManager::addUser now expects userIdStr and handles conversion/validation
-    if (m_dbManager->addUser(userIdStr, password)) {
-        QMessageBox::information(this, tr("Sign Up Successful"), tr("User ID '%1' created successfully. You can now log in.").arg(userIdStr));
+    if (m_dbManager->addUser(username, password)) {
+        QMessageBox::information(this, tr("Sign Up Successful"), tr("User '%1' created successfully. You can now log in.").arg(username));
         usernameEdit->clear();
         passwordEdit->clear();
     } else {
-        // Error message is handled by showDatabaseError slot via errorOccurred signal
-        // or if addUser returns false due to non-integer ID, it would have emitted an error.
+        // DatabaseManager emits errorOccurred signal which is connected to showDatabaseError
+        // Or you can retrieve a more specific error if addUser returned it.
+        // For now, relying on the signal.
     }
 }
 

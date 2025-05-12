@@ -6,18 +6,18 @@
 #include <QHBoxLayout>
 #include <QPixmap>
 #include <QMouseEvent>
-#include <QApplication> 
+#include <QApplication>
 #include <QGraphicsDropShadowEffect>
-#include <QPainter> 
-#include <QPainterPath> 
-#include <QEvent> 
-#include <QIcon> 
-#include <QSizePolicy> 
-#include <QWidget> 
-#include <QPalette> 
-#include <QVariantAnimation> 
-#include <QTextDocument>     
-#include <QRegularExpression> 
+#include <QPainter>
+#include <QPainterPath>
+#include <QEvent>
+#include <QIcon>
+#include <QSizePolicy>
+#include <QWidget>
+#include <QPalette>
+#include <QVariantAnimation>
+#include <QTextDocument>
+#include <QRegularExpression>
 
 void LoginDialog::applyStyles()
 {
@@ -152,12 +152,12 @@ void LoginDialog::applyStyles()
     passwordEdit->setPalette(palette);
 
     QPalette fpPalette = forgotPasswordLabel->palette();
-    if (fpPalette.color(QPalette::WindowText) != forgotPasswordNormalColor) {
+    if (fpPalette.color(QPalette::WindowText) != forgotPasswordNormalColor)
+    {
         fpPalette.setColor(QPalette::WindowText, forgotPasswordNormalColor);
         forgotPasswordLabel->setPalette(fpPalette);
     }
 }
-
 
 void LoginDialog::setupUi()
 {
@@ -241,7 +241,7 @@ void LoginDialog::setupUi()
     fpVerticalLayout->setContentsMargins(0, 0, 0, 0);
     fpVerticalLayout->setSpacing(0);
 
-    forgotPasswordLabel = new QLabel(tr("Forgot password?"), forgotPasswordInteractiveWidget); 
+    forgotPasswordLabel = new QLabel(tr("Forgot password?"), forgotPasswordInteractiveWidget);
     forgotPasswordLabel->setObjectName("forgotPasswordLabel");
     forgotPasswordLabel->setCursor(Qt::PointingHandCursor); // 保持手形光标以指示可交互
     forgotPasswordLabel->installEventFilter(this);
@@ -255,7 +255,7 @@ void LoginDialog::setupUi()
 
     forgotPasswordUnderline = new QWidget(forgotPasswordUnderlineContainer);
     forgotPasswordUnderline->setStyleSheet(QString("background-color: %1;").arg(underlineColor.name()));
-    
+
     fpVerticalLayout->addWidget(forgotPasswordLabel);
     fpVerticalLayout->addWidget(forgotPasswordUnderlineContainer);
     forgotPasswordInteractiveWidget->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
@@ -289,10 +289,12 @@ void LoginDialog::setupUi()
     targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
     targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
 
-    if (initialLoginWidth + initialSignUpWidth != totalWidthForButtonsOnly) {
+    if (initialLoginWidth + initialSignUpWidth != totalWidthForButtonsOnly)
+    {
         initialSignUpWidth = totalWidthForButtonsOnly - initialLoginWidth;
     }
-    if (targetLoginWidthOnSignUpHover + targetSignUpWidthOnSignUpHover != totalWidthForButtonsOnly) {
+    if (targetLoginWidthOnSignUpHover + targetSignUpWidthOnSignUpHover != totalWidthForButtonsOnly)
+    {
         targetSignUpWidthOnSignUpHover = qRound(totalWidthForButtonsOnly * 0.82);
         targetLoginWidthOnSignUpHover = totalWidthForButtonsOnly - targetSignUpWidthOnSignUpHover;
     }
@@ -357,7 +359,9 @@ void LoginDialog::setupUi()
 
     signUpButton->installEventFilter(this);
 
+    connect(signUpButton, &QPushButton::clicked, this, &LoginDialog::onSignUpClicked); // New: Connect sign up button
     connect(loginButton, &QPushButton::clicked, this, &LoginDialog::onLoginClicked);
+    
     connect(minimizeButton, &QPushButton::clicked, this, &LoginDialog::onMinimizeClicked);
     connect(closeButton, &QPushButton::clicked, this, &LoginDialog::onCloseClicked);
 }

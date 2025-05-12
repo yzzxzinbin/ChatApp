@@ -31,6 +31,7 @@ class PeerInfoWidget; // Forward declaration for our new widget
 class FormattingToolbarHandler; // Forward declaration for the new handler
 class NetworkEventHandler; // Forward declaration for network event handler
 class ChatHistoryManager; // 新增：前向声明 ChatHistoryManager
+class MySqlDatabase; // 新增：前向声明 MySqlDatabase
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow

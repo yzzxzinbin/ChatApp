@@ -8,6 +8,7 @@
 #include <QParallelAnimationGroup> 
 #include <QColor> // 新增
 #include <QShowEvent> // 新增
+#include "databasemanager.h" // New: Include DatabaseManager
 
 QT_BEGIN_NAMESPACE
 class QLabel;
@@ -38,11 +39,13 @@ private slots:
     void onLoginClicked();
     void onMinimizeClicked(); 
     void onCloseClicked();    
+    void onSignUpClicked(); // New: Slot for sign up button
 
 private:
     void setupUi();
     void applyStyles();
     QPixmap createRoundedPixmap(const QPixmap &source, int radius); 
+    void showDatabaseError(const QString& errorMsg); // New: Helper to show DB errors
 
     QLabel *imageLabel;
     QLineEdit *usernameEdit;
@@ -79,6 +82,8 @@ private:
     int initialSignUpWidth;
     int targetLoginWidthOnSignUpHover; 
     int targetSignUpWidthOnSignUpHover; 
+
+    DatabaseManager *m_dbManager; // New: DatabaseManager instance
 };
 
 #endif // LOGINDIALOG_H

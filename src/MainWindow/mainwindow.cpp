@@ -4,7 +4,7 @@
 #include "networkmanager.h"           // 确保包含了 NetworkManager
 #include "settingsdialog.h"           // 确保包含了 SettingsDialog
 #include "peerinfowidget.h"           // Include the new PeerInfoWidget header
-#include "styleutils.h"               // Include the new StyleUtils header
+#include "mainwindowstyle.h"               // Include the new StyleUtils header
 #include "formattingtoolbarhandler.h" // Include the new FormattingToolbarHandler header
 #include "networkeventhandler.h"      // Include the new NetworkEventHandler header
 #include "chathistorymanager.h"       // 新增：包含 ChatHistoryManager

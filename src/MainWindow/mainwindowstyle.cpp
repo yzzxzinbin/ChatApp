@@ -1,4 +1,4 @@
-#include "styleutils.h"
+#include "mainwindowstyle.h"
 
 namespace StyleUtils {
 

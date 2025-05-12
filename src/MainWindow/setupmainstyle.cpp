@@ -1,7 +1,7 @@
 #include "mainwindow.h"
 #include "peerinfowidget.h"
 #include "formattingtoolbarhandler.h"
-#include "styleutils.h"
+#include "mainwindowstyle.h"
 #include "chatmessagedisplay.h"
 
 #include <QPushButton>
