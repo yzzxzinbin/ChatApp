@@ -58,9 +58,9 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
 
     networkManager = new NetworkManager(this);
     networkManager->setLocalUserDetails(localUserUuid, localUserName);
+    // 设置监听偏好，但还不立即启动监听
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
-    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
 
     contactManager = new ContactManager(networkManager, this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
@@ -95,14 +95,19 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
 
     loadCurrentUserContacts();
 
+    // 关键改动：首先根据设置启动TCP监听
     if (autoNetworkListeningEnabled)
     {
-        networkManager->startListening();
+        networkManager->startListening(); // TCP服务器在此处尝试启动
     }
     else
     {
         updateNetworkStatus(tr("Network listening is disabled in settings."));
     }
+
+    // 然后设置并启动UDP发现。此时 tcpServer->isListening() 的状态是正确的。
+    // setUdpDiscoveryPreferences 内部会在启用时调用 startUdpDiscovery -> sendUdpBroadcast
+    networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
 }
 
 MainWindow::~MainWindow()
