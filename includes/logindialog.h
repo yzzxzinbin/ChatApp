@@ -41,6 +41,7 @@ private slots:
     void onMinimizeClicked(); 
     void onCloseClicked();    
     void onSignUpClicked(); // New: Slot for sign up button
+    void onForgotPasswordClicked(); // 新增：忘记密码槽
 
 private:
     void setupUi();

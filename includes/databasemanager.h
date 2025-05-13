@@ -20,9 +20,9 @@ public:
     // User management
     // IMPORTANT: In a real application, passwords should be hashed.
     bool validateUser(const QString &username, const QString &password);
-    bool addUser(const QString &username, const QString &password);
-    bool userExists(const QString &username);
-
+    bool addUser(const QString &userIdStr, const QString &password);
+    bool userExists(const QString &userIdStr);
+    bool resetPassword(const QString &userIdStr, const QString &newPassword); // 新增方法
 
 signals:
     void errorOccurred(const QString &errorMsg);

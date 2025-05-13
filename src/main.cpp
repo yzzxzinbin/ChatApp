@@ -71,8 +71,8 @@ int main(int argc, char *argv[])
     QApplication a(argc, argv);
 
     // 设置组织和固定的应用程序名称
-    QCoreApplication::setOrganizationName("YourOrgName"); // 替换为您的组织名
-    QCoreApplication::setApplicationName("ChatApp");    // 固定应用名
+    QCoreApplication::setOrganizationName("ZhouXuSoftware");
+    QCoreApplication::setApplicationName("ChatApp");    // 应用名
 
     // 初始化日志记录
     QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/logs";
@@ -133,7 +133,7 @@ int main(int argc, char *argv[])
     MainWindow w(loggedInUserIdStr); // 将登录的用户ID传递给MainWindow
     qInfo() << "MainWindow constructed. Attempting to show...";
     w.setWindowIcon(QIcon(":/icons/app_logo.ico")); 
-    w.setWindowTitle(QString("%1 (User: %2) - By CCZU_ZX").arg(QCoreApplication::applicationName()).arg(loggedInUserIdStr)); // 标题栏显示用户名
+    w.setWindowTitle(QString("%1 (User: %2) - By ZX").arg(QCoreApplication::applicationName()).arg(loggedInUserIdStr)); // 标题栏显示用户名
     w.show();
     qInfo() << "MainWindow show() called.";
 

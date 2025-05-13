@@ -240,3 +240,52 @@ bool DatabaseManager::userExists(const QString &userIdStr)
     }
     return false; // Should not happen if query executes correctly
 }
+
+bool DatabaseManager::resetPassword(const QString &userIdStr, const QString &newPassword)
+{
+    if (!isConnected()) {
+        emit errorOccurred("Database not connected. Cannot reset password.");
+        return false;
+    }
+    if (userIdStr.isEmpty() || newPassword.isEmpty()) {
+        emit errorOccurred("User ID or new password cannot be empty for password reset.");
+        return false;
+    }
+
+    bool ok;
+    int userId = userIdStr.toInt(&ok);
+    if (!ok) {
+        QString errorMsg = QString("Invalid User ID format for password reset: '%1' is not a valid integer.").arg(userIdStr);
+        qCritical() << errorMsg;
+        emit errorOccurred(errorMsg);
+        return false;
+    }
+
+    // IMPORTANT: In a real application, hash the password before storing.
+    QString hashedPasswordToStore = newPassword; // Placeholder for actual hashing
+
+    QSqlQuery query(m_db);
+    query.prepare("UPDATE chat_user SET user_pwd = :password WHERE user_id = :user_id");
+    query.bindValue(":password", hashedPasswordToStore);
+    query.bindValue(":user_id", userId);
+
+    if (!query.exec()) {
+        QString errorMsg = QString("Failed to reset password for User ID '%1': %2").arg(userId).arg(query.lastError().text());
+        qCritical() << errorMsg;
+        emit errorOccurred(errorMsg);
+        return false;
+    }
+
+    if (query.numRowsAffected() > 0) {
+        qInfo() << "Password for User ID" << userId << "reset successfully in database.";
+        return true;
+    } else {
+        // This case means the user_id was not found in the database,
+        // though the QSettings check should ideally prevent this.
+        // Or, the password was the same as the old one (some DBs might report 0 affected rows).
+        QString errorMsg = QString("Password reset for User ID '%1' affected 0 rows. User might not exist or password unchanged.").arg(userId);
+        qWarning() << errorMsg;
+        // emit errorOccurred(errorMsg); // Decide if this is an error to show to user
+        return false; // Or true if "unchanged" is acceptable. For now, false.
+    }
+}

@@ -21,6 +21,8 @@
 #include <QMessageBox> // New: For showing messages
 #include <QSettings> // For saving UUID and password backup
 #include <QUuid>     // For generating UUID
+#include <QInputDialog> // 新增：用于输入对话框
+#include <QTimer> // 新增：用于延迟调用
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent), m_dragging(false), 
@@ -43,6 +45,18 @@ LoginDialog::LoginDialog(QWidget *parent)
     this->update();
 
     setFixedSize(440, 500);
+
+    // 加载 "记住我" 设置
+    QSettings settings;
+    bool rememberMe = settings.value("LoginDialog/RememberMeChecked", false).toBool();
+    rememberMeCheckBox->setChecked(rememberMe);
+    if (rememberMe) {
+        QString lastUserId = settings.value("LoginDialog/LastUserID").toString();
+        if (!lastUserId.isEmpty()) {
+            usernameEdit->setText(lastUserId);
+            passwordEdit->setFocus(); // 如果用户名已填，焦点移到密码框
+        }
+    }
 
     // Attempt to connect to the database with specified credentials new pwd is 12345678
     // Host: "127.0.0.1", DB: "QTWork", User: "root", Pass: "12345678", Port: 3306
@@ -104,7 +118,16 @@ void LoginDialog::onLoginClicked()
         }
 
         settings.setValue(activeSessionKey, true);
-        settings.sync();
+
+        // 处理 "记住我"
+        if (rememberMeCheckBox->isChecked()) {
+            settings.setValue("LoginDialog/RememberMeChecked", true);
+            settings.setValue("LoginDialog/LastUserID", username);
+        } else {
+            settings.setValue("LoginDialog/RememberMeChecked", false);
+            settings.remove("LoginDialog/LastUserID"); // 或者 setValue 为空字符串
+        }
+        settings.sync(); // 确保所有设置写入
 
         QMessageBox::information(this, tr("Login Successful"), tr("Welcome, %1!").arg(username));
         m_loggedInUserIdStr = username; // 存储成功登录的ID
@@ -180,6 +203,91 @@ void LoginDialog::onSignUpClicked()
         passwordEdit->clear();
     } else {
         // Error message is handled by showDatabaseError slot via errorOccurred signal
+    }
+}
+
+void LoginDialog::onForgotPasswordClicked()
+{
+    bool ok_uuid;
+    QString enteredUuid = QInputDialog::getText(this, tr("Reset Password - Enter UUID"),
+                                              tr("Please enter your User UUID to reset your password:"),
+                                              QLineEdit::Normal, QString(), &ok_uuid);
+
+    if (!ok_uuid || enteredUuid.isEmpty()) {
+        if (ok_uuid && enteredUuid.isEmpty()) {
+             QMessageBox::information(this, tr("Reset Password"), tr("UUID input cancelled or empty."));
+        }
+        // 如果用户点击取消，ok_uuid 会是 false，此时不显示消息
+        return;
+    }
+
+    QSettings settings;
+    settings.beginGroup("UserAccounts");
+    QStringList userIds = settings.childGroups();
+    QString foundUserId;
+    QString storedPasswordBackup; // 用于检查是否真的需要重置
+
+    for (const QString &userId : userIds) {
+        settings.beginGroup(userId + "/Profile");
+        QString currentUuid = settings.value("uuid").toString();
+        if (currentUuid == enteredUuid) {
+            foundUserId = userId;
+            storedPasswordBackup = settings.value("passwordBackup").toString();
+            settings.endGroup(); // Profile
+            break;
+        }
+        settings.endGroup(); // Profile
+    }
+    settings.endGroup(); // UserAccounts
+
+    if (foundUserId.isEmpty()) {
+        QMessageBox::warning(this, tr("Reset Password Failed"), tr("The entered UUID was not found."));
+        return;
+    }
+
+    // 找到用户，提示输入新密码
+    bool ok_new_pass;
+    QString newPassword = QInputDialog::getText(this, tr("Reset Password - New Password"),
+                                                tr("Enter new password for User ID '%1':").arg(foundUserId),
+                                                QLineEdit::Password, QString(), &ok_new_pass);
+
+    if (!ok_new_pass || newPassword.isEmpty()) {
+        QMessageBox::information(this, tr("Reset Password"), tr("Password reset cancelled or new password empty."));
+        return;
+    }
+    if (newPassword.length() < 6) {
+        QMessageBox::warning(this, tr("Reset Password Failed"), tr("New password must be at least 6 characters long."));
+        return;
+    }
+
+    bool ok_confirm_pass;
+    QString confirmPassword = QInputDialog::getText(this, tr("Reset Password - Confirm Password"),
+                                                   tr("Confirm new password for User ID '%1':").arg(foundUserId),
+                                                   QLineEdit::Password, QString(), &ok_confirm_pass);
+    
+    if (!ok_confirm_pass || confirmPassword.isEmpty()) {
+         QMessageBox::information(this, tr("Reset Password"), tr("Password confirmation cancelled or empty."));
+        return;
+    }
+
+    if (newPassword != confirmPassword) {
+        QMessageBox::warning(this, tr("Reset Password Failed"), tr("Passwords do not match."));
+        return;
+    }
+
+    // 密码有效且匹配，尝试更新数据库和QSettings
+    if (m_dbManager && m_dbManager->isConnected()) {
+        if (m_dbManager->resetPassword(foundUserId, newPassword)) {
+            // 更新QSettings中的密码备份
+            settings.setValue(QString("UserAccounts/%1/Profile/passwordBackup").arg(foundUserId), newPassword);
+            settings.sync();
+            QMessageBox::information(this, tr("Reset Password Successful"), tr("Password for User ID '%1' has been reset.").arg(foundUserId));
+        } else {
+            // DatabaseManager 会通过 errorOccurred 信号显示错误，或者在这里可以显示一个通用错误
+            // QMessageBox::critical(this, tr("Reset Password Failed"), tr("Could not update password in the database."));
+        }
+    } else {
+        QMessageBox::critical(this, tr("Reset Password Failed"), tr("Database is not connected. Cannot reset password."));
     }
 }
 
@@ -423,6 +531,16 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
             underlineAnimation->setDirection(QAbstractAnimation::Forward); 
             underlineAnimation->start();
             return true;
+        } else if (event->type() == QEvent::MouseButtonRelease) { // 新增点击处理
+            QMouseEvent *mouseEvent = static_cast<QMouseEvent*>(event);
+            if (mouseEvent->button() == Qt::LeftButton && forgotPasswordLabel->rect().contains(mouseEvent->pos())) {
+                if (weakThis) {
+                    // 使用 QTimer::singleShot 延迟调用，以允许事件过滤器返回
+                    // 并避免在事件过滤器内部打开对话框可能导致的问题。
+                    QTimer::singleShot(0, weakThis.data(), &LoginDialog::onForgotPasswordClicked);
+                }
+                return true; // 事件已处理
+            }
         }
     }
     return QDialog::eventFilter(watched, event);
