@@ -2,35 +2,27 @@
 #define CHATHISTORYMANAGER_H
 
 #include <QObject>
-#include <QString>
 #include <QStringList>
-#include <QDir>
-#include <QStandardPaths>
-#include <QFile>
-#include <QDataStream>
-#include <QDebug>
-#include <QCoreApplication> // Required for applicationDirPath as fallback
+#include <QString>
 
 class ChatHistoryManager : public QObject
 {
     Q_OBJECT
 public:
-    explicit ChatHistoryManager(const QString& appName, QObject *parent = nullptr);
+    // 构造函数接收 appName/userId 格式的字符串
+    explicit ChatHistoryManager(const QString &appNameAndUserId, QObject *parent = nullptr);
 
-    // Saves the given chat history for the peer.
-    // Returns true on success, false otherwise.
-    bool saveChatHistory(const QString& peerUuid, const QStringList& history);
-
-    // Loads chat history for the peer.
-    // Returns the list of messages, or an empty list if not found or error.
-    QStringList loadChatHistory(const QString& peerUuid);
+    QStringList loadChatHistory(const QString &peerUuid);
+    bool saveChatHistory(const QString &peerUuid, const QStringList &history);
+    void clearChatHistory(const QString &peerUuid);    // 确保声明存在
+    void clearAllChatHistory(); // 确保声明存在 (如果需要)
 
 private:
-    void initializeChatHistoryDir();
-    QString getPeerChatHistoryFilePath(const QString& peerUuid) const;
+    QString m_appNameAndUserId; // 存储传入的 "AppName/UserId"
+    QString m_userSpecificChatHistoryBasePath; // 用户特定的聊天记录基础路径
 
-    QString chatHistoryBaseDir;
-    QString applicationName; // Stores the application name for path construction
+    void initializeChatHistoryDir();
+    QString getPeerChatHistoryFilePath(const QString &peerUuid) const;
 };
 
 #endif // CHATHISTORYMANAGER_H

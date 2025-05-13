@@ -26,8 +26,9 @@ class LoginDialog : public QDialog
 public:
     explicit LoginDialog(QWidget *parent = nullptr);
     ~LoginDialog();
+    QString getLoggedInUserId() const; // 正确的 const 位置和注释
 
-protected:
+protected: // 将事件处理器移至 protected
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
     void mouseReleaseEvent(QMouseEvent *event) override;
@@ -84,6 +85,7 @@ private:
     int targetSignUpWidthOnSignUpHover; 
 
     DatabaseManager *m_dbManager; // New: DatabaseManager instance
+    QString m_loggedInUserIdStr; // 确保此成员变量存在
 };
 
 #endif // LOGINDIALOG_H

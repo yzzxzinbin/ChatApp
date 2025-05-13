@@ -9,6 +9,11 @@
         "qlabel": "cpp",
         "qgraphicsdropshadoweffect": "cpp",
         "qpainter": "cpp",
-        "qnetworkinterface": "cpp"
+        "qnetworkinterface": "cpp",
+        "qsqlquery": "cpp",
+        "xstring": "cpp",
+        "*.tcc": "cpp",
+        "string": "cpp",
+        "random": "cpp"
     }
 }

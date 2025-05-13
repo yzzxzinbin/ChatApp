@@ -4,13 +4,14 @@
 #include <QMainWindow>
 #include <QStackedWidget>
 #include <QLabel>
-#include <QMap> // For chat history
+#include <QMap>        // For chat history
 #include <QStringList> // For chat history
-#include <QUuid> // For UUID generation
-#include <QSettings> // For storing UUID
-#include <QKeyEvent> // 新增：包含 QKeyEvent
+#include <QUuid>       // For UUID generation
+#include <QSettings>   // For storing UUID
+#include <QKeyEvent>   // 新增：包含 QKeyEvent
+#include <QTcpSocket>
 #include "chatmessagedisplay.h" // 添加自定义组件头文件
-#include "networkmanager.h" // Include NetworkManager
+#include "networkmanager.h"     // Include NetworkManager
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
@@ -23,15 +24,15 @@ class QWidget;
 class QFontComboBox;
 class QComboBox;
 class QTextCharFormat; // For formatting
-class QColor; // For color selection
+class QColor;          // For color selection
 
 class ContactManager;
-class SettingsDialog; // Forward declaration
-class PeerInfoWidget; // Forward declaration for our new widget
+class SettingsDialog;           // Forward declaration
+class PeerInfoWidget;           // Forward declaration for our new widget
 class FormattingToolbarHandler; // Forward declaration for the new handler
-class NetworkEventHandler; // Forward declaration for network event handler
-class ChatHistoryManager; // 新增：前向声明 ChatHistoryManager
-class MySqlDatabase; // 新增：前向声明 MySqlDatabase
+class NetworkEventHandler;      // Forward declaration for network event handler
+class ChatHistoryManager;       // 新增：前向声明 ChatHistoryManager
+class MySqlDatabase;            // 新增：前向声明 MySqlDatabase
 QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
@@ -39,20 +40,38 @@ class MainWindow : public QMainWindow
     Q_OBJECT
 
 public:
-    MainWindow(QWidget *parent = nullptr);
+    // 修改构造函数以接收登录的用户ID
+    explicit MainWindow(const QString &currentUserId, QWidget *parent = nullptr);
     ~MainWindow();
     QString getLocalUserName() const;
-    QString getLocalUserUuid() const; // 新增
-    quint16 getLocalListenPort() const; // Add the public getter method
-    void updateNetworkStatus(const QString &status); // Make updateNetworkStatus public
-    void loadOrCreateUserIdentity(); // 新增方法
-    void saveChatHistory(const QString& peerUuid); // 确保此方法是 public 或 NetworkEventHandler 可以访问
+    QString getLocalUserUuid() const;
+    quint16 getLocalListenPort() const;
+    void updateNetworkStatus(const QString &status);
+    // loadOrCreateUserIdentity 重命名并修改参数
+    void loadCurrentUserIdentity();
+    void saveChatHistory(const QString &peerUuid);
 
-protected: // 新增：或者 public，取决于您的偏好
+protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 
 public slots:
-    void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port); // 更新签名以包含IP和端口，用于持久化
+    void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port);
+
+private slots: // 将这些声明为 private slots
+    void onAddContactButtonClicked();
+    void onSettingsButtonClicked();
+    void onContactSelected(QListWidgetItem *current, QListWidgetItem *previous);
+    void onSendButtonClicked();
+    void onClearButtonClicked(); // 确保这个函数有定义，或者移除连接它的代码
+    void handleTextColorChanged(const QColor &color);
+    void handleBackgroundColorChanged(const QColor &color);
+    void handleIncomingConnectionRequest(QTcpSocket *tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
+    void handleSettingsApplied(const QString &userName,
+                               quint16 listenPort,
+                               bool enableListening,
+                               quint16 outgoingPort, bool useSpecificOutgoingPortVal,
+                               bool enableUdpDiscovery, quint16 udpDiscoveryPort,
+                               bool enableContinuousUdpBroadcast, int udpBroadcastInterval);
 
 private:
     // Declare widgets and layouts
@@ -81,12 +100,12 @@ private:
     QPushButton *boldButton;
     QPushButton *italicButton;
     QPushButton *underlineButton;
-    QPushButton *colorButton; // 添加颜色按钮
+    QPushButton *colorButton;   // 添加颜色按钮
     QPushButton *bgColorButton; // 文本背景色按钮
     QComboBox *fontSizeComboBox;
     QFontComboBox *fontFamilyComboBox;
     QColor currentTextColor; // 当前文本颜色
-    QColor currentBgColor; // 当前背景色
+    QColor currentBgColor;   // 当前背景色
 
     QWidget *inputAreaWidget;
     QHBoxLayout *inputAreaLayout;
@@ -108,50 +127,31 @@ private:
     // Data members for chat history and current contact
     QMap<QString, QStringList> chatHistories;
     QString currentOpenChatContactName;
-    ChatHistoryManager* chatHistoryManager; // 新增：聊天记录管理器
+    ChatHistoryManager *chatHistoryManager; // 新增：聊天记录管理器
 
     // 用户设置
     QString localUserName;
     QString localUserUuid; // 新增：本地用户的UUID
     quint16 localListenPort;
-    bool autoNetworkListeningEnabled; // 新增：用户是否启用了网络监听
-    bool udpDiscoveryEnabled;         // 新增：用户是否启用了UDP发现
+    bool autoNetworkListeningEnabled;   // 新增：用户是否启用了网络监听
+    bool udpDiscoveryEnabled;           // 新增：用户是否启用了UDP发现
     quint16 localUdpDiscoveryPort;      // Added
     bool udpContinuousBroadcastEnabled; // Added
     int udpBroadcastIntervalSeconds;    // Added
     quint16 localOutgoingPort;
     bool useSpecificOutgoingPort; // 新增：是否使用特定的传出源端口
 
-    PeerInfoWidget *peerInfoDisplayWidget; // New widget instance
+    PeerInfoWidget *peerInfoDisplayWidget;       // New widget instance
     FormattingToolbarHandler *formattingHandler; // New handler instance
-    NetworkEventHandler *networkEventHandler; // New network event handler instance
+    NetworkEventHandler *networkEventHandler;    // New network event handler instance
+
+    QString m_currentUserIdStr; // 新增：存储当前登录的用户ID
 
     void setupUI();
     // 新增：联系人持久化和重连方法
     void saveContacts();
     void loadContactsAndAttemptReconnection();
-
-private slots:
-    void onClearButtonClicked();
-    void onAddContactButtonClicked();
-    void onContactSelected(QListWidgetItem *current, QListWidgetItem *previous);
-    void onSendButtonClicked();
-    void onSettingsButtonClicked(); // 设置按钮的槽函数
-    void handleSettingsApplied(const QString &userName,
-                               quint16 listenPort,
-                               bool enableListening, // 新增
-                               quint16 outgoingPort, bool useSpecificOutgoingPort,
-                               bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                               bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
-    void handleRetryListenNow(); // 新增槽函数
-    void handleManualUdpBroadcastRequested(); // 新增槽
-
-    // This slot remains in MainWindow due to heavy UI interaction (QMessageBox, QInputDialog)
-    // 更新签名以匹配 NetworkManager::incomingSessionRequest
-    void handleIncomingConnectionRequest(QTcpSocket* tempSocket, const QString &peerAddress, quint16 peerPort, const QString &peerUuid, const QString &peerNameHint);
-
-    // New slots to update MainWindow's color state from FormattingToolbarHandler
-    void handleTextColorChanged(const QColor &color);
-    void handleBackgroundColorChanged(const QColor &color);
+    void loadCurrentUserContacts(); // 新增：加载当前用户的联系人
+    void saveCurrentUserContacts(); // 新增：保存当前用户的联系人
 };
 #endif // MAINWINDOW_H

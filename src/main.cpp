@@ -6,12 +6,11 @@
 #include <QDateTime>
 #include <QDir>
 #include <iostream> // For stderr output
-#include <QSharedMemory> // Required for instance management using shared memory
 #include <QSettings>    // To log settings file path
 #include <QIcon>      // 新增：用于设置图标
+#include <QMessageBox> // For showing "already running" message
+#include  <QStandardPaths>
 
-// Global shared memory object to lock the instance name
-static QSharedMemory* g_instanceLockMemory = nullptr;
 // Global log file variable
 static QFile* g_logFile = nullptr;
 
@@ -67,136 +66,24 @@ void customMessageOutput(QtMsgType type, const QMessageLogContext &context, cons
     }
 }
 
-// Function to determine the instance name and acquire a lock using QSharedMemory
-QString determineApplicationInstanceName(QString& outInstanceSuffix) {
-    QFile instLogFile(QDir(QCoreApplication::applicationDirPath()).filePath("instance_check_sm.log"));
-    if (!instLogFile.open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        QTextStream(stderr) << "CRITICAL: Could not open instance_check_sm.log for writing." << Qt::endl;
-    }
-    QTextStream instLog(&instLogFile);
-    instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Starting instance check with QSharedMemory.\n";
-
-    const QString baseAppName = QStringLiteral("ChatApp");
-    // IMPORTANT: QSharedMemory keys must be unique system-wide.
-    // Using a UUID or a very specific string is recommended.
-    const QString baseSharedMemoryKey = QStringLiteral("ChatAppSharedMemoryKey_d7b3f8a0_c1e5_4b9f_8f2a_1b9c7d8e0f3a");
-    outInstanceSuffix = QStringLiteral("");
-    QTextStream errStream(stderr);
-
-    errStream << "determineApplicationInstanceName (SharedMemory): Starting. BaseKey: " << baseSharedMemoryKey << Qt::endl;
-    instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] BaseKey: " << baseSharedMemoryKey << "\n";
-
-    g_instanceLockMemory = new QSharedMemory(baseSharedMemoryKey);
-    instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Attempting to create shared memory with base key: " << baseSharedMemoryKey << "\n";
-
-    // Attempt to create the shared memory segment (size 1 is enough for a lock)
-    if (g_instanceLockMemory->create(1, QSharedMemory::ReadWrite)) {
-        errStream << "determineApplicationInstanceName (SharedMemory): Successfully created shared memory with base key. This is MAIN instance." << Qt::endl;
-        instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Successfully created base key. MAIN instance. Key: " << g_instanceLockMemory->key() << "\n";
-        // qInfo() might not be caught yet if handler not installed
-        // qInfo() << "This is the first instance (main). SharedMemory lock acquired:" << g_instanceLockMemory->key();
-        if (instLogFile.isOpen()) instLogFile.close();
-        return baseAppName;
-    } else {
-        // Creation failed, check why
-        errStream << "determineApplicationInstanceName (SharedMemory): Failed to create shared memory with base key. Error: "
-                  << g_instanceLockMemory->errorString() << " (Code: " << g_instanceLockMemory->error() << ")" << Qt::endl;
-        instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Failed to create with base key. Error: "
-                  << g_instanceLockMemory->errorString() << " (Code: " << g_instanceLockMemory->error() << ")\n";
-
-        if (g_instanceLockMemory->error() != QSharedMemory::AlreadyExists) {
-            errStream << "determineApplicationInstanceName (SharedMemory): Error is NOT AlreadyExists. Proceeding as main, potential conflict." << Qt::endl;
-            instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Error is NOT AlreadyExists (" << g_instanceLockMemory->errorString() << "). Proceeding as main.\n";
-            // qCritical() might not be caught yet
-            // qCritical() << "Could not create/check shared memory" << baseSharedMemoryKey << ":" << g_instanceLockMemory->errorString()
-            //             << ".Proceeding as main instance, but conflicts are possible.";
-            delete g_instanceLockMemory; // Clean up the failed attempt
-            g_instanceLockMemory = nullptr; // No lock acquired
-            if (instLogFile.isOpen()) instLogFile.close();
-            return baseAppName; // Fallback to main instance name
-        }
-        // AlreadyExists: Main instance is (likely) running.
-        errStream << "determineApplicationInstanceName (SharedMemory): Base key in use. Main instance detected. Trying suffixes." << Qt::endl;
-        instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Base key in use. Trying suffixes.\n";
-        delete g_instanceLockMemory; // Delete the QSharedMemory object that failed to create
-        g_instanceLockMemory = nullptr;
-        // qInfo() << "Main instance detected (shared memory). Attempting to start as a suffixed instance.";
-    }
-
-    for (char c = 'A'; c <= 'Z'; ++c) {
-        outInstanceSuffix = QString("_%1").arg(c);
-        QString currentSharedMemoryKey = baseSharedMemoryKey + outInstanceSuffix;
-        errStream << "determineApplicationInstanceName (SharedMemory): Trying suffix " << outInstanceSuffix << " with key " << currentSharedMemoryKey << Qt::endl;
-        instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Trying suffix " << outInstanceSuffix << " with key " << currentSharedMemoryKey << "\n";
-        
-        g_instanceLockMemory = new QSharedMemory(currentSharedMemoryKey);
-        instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Attempting to create shared memory with key: " << currentSharedMemoryKey << "\n";
-
-        if (g_instanceLockMemory->create(1, QSharedMemory::ReadWrite)) {
-            errStream << "determineApplicationInstanceName (SharedMemory): Successfully created shared memory with key " << currentSharedMemoryKey << ". This is instance " << outInstanceSuffix << Qt::endl;
-            instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Successfully created suffixed key. Instance " << outInstanceSuffix << ". Key: " << g_instanceLockMemory->key() << "\n";
-            // qInfo() << "This is instance" << outInstanceSuffix << ". SharedMemory lock acquired:" << g_instanceLockMemory->key();
-            if (instLogFile.isOpen()) instLogFile.close();
-            return baseAppName + outInstanceSuffix;
-        } else {
-            errStream << "determineApplicationInstanceName (SharedMemory): Failed to create shared memory with key " << currentSharedMemoryKey << ". Error: "
-                      << g_instanceLockMemory->errorString() << " (Code: " << g_instanceLockMemory->error() << ")" << Qt::endl;
-            instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Failed to create with key " << currentSharedMemoryKey << ". Error: "
-                      << g_instanceLockMemory->errorString() << " (Code: " << g_instanceLockMemory->error() << ")\n";
-
-            if (g_instanceLockMemory->error() != QSharedMemory::AlreadyExists) {
-                errStream << "determineApplicationInstanceName (SharedMemory): Error for suffix " << outInstanceSuffix << " is NOT AlreadyExists. Proceeding as this instance, potential conflict." << Qt::endl;
-                instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] Error for suffix " << outInstanceSuffix << " is NOT AlreadyExists. Proceeding as this instance.\n";
-                // qCritical() << "Could not create/check shared memory" << currentSharedMemoryKey << ":" << g_instanceLockMemory->errorString()
-                //             << ".Proceeding as instance" << outInstanceSuffix << ", but conflicts are possible.";
-                delete g_instanceLockMemory;
-                g_instanceLockMemory = nullptr; // No lock acquired
-                if (instLogFile.isOpen()) instLogFile.close();
-                return baseAppName + outInstanceSuffix; // Return with suffix despite error
-            }
-            // AlreadyExists: This suffix is also taken. Clean up and try next.
-            delete g_instanceLockMemory;
-            g_instanceLockMemory = nullptr;
-        }
-    }
-
-    errStream << "determineApplicationInstanceName (SharedMemory): All suffixes A-Z taken. Running as _Overflow." << Qt::endl;
-    instLog << QDateTime::currentDateTime().toString("yyyy-MM-dd hh:mm:ss.zzz") << " [DEBUG_SM_INST] All suffixes A-Z taken. Running as _Overflow.\n";
-    // qWarning() << "All instance suffixes (_A to _Z) are taken using SharedMemory. Running with _Overflow suffix. Conflicts are highly probable.";
-    outInstanceSuffix = QStringLiteral("_Overflow");
-    // No shared memory segment is held for _Overflow, making it prone to conflicts if multiple overflows occur.
-    if (instLogFile.isOpen()) instLogFile.close();
-    return baseAppName + outInstanceSuffix;
-}
-
-
 int main(int argc, char *argv[])
 {
-    QApplication a(argc, argv); // QApplication must be created first.
+    QApplication a(argc, argv);
 
-    QString instanceSuffix;
-    QString effectiveAppName = determineApplicationInstanceName(instanceSuffix);
+    // 设置组织和固定的应用程序名称
+    QCoreApplication::setOrganizationName("YourOrgName"); // 替换为您的组织名
+    QCoreApplication::setApplicationName("ChatApp");    // 固定应用名
 
-    qInstallMessageHandler(customMessageOutput);
-
-    QCoreApplication::setOrganizationName("CCZU_ZX");
-    QCoreApplication::setApplicationName(effectiveAppName); 
-
-    QString logFileSuffixForName = instanceSuffix.isEmpty() ? "" : instanceSuffix;
-    QString logFileName = QString("chatapp%1_debug.log").arg(logFileSuffixForName);
-    QString logFilePath = QDir(QCoreApplication::applicationDirPath()).filePath(logFileName);
-    
-    if (g_logFile) {
-        if (g_logFile->isOpen()) {
-            g_logFile->close();
-        }
-        delete g_logFile;
-        g_logFile = nullptr;
+    // 初始化日志记录
+    QString logDir = QStandardPaths::writableLocation(QStandardPaths::AppLocalDataLocation) + "/logs";
+    if (!QDir().mkpath(logDir)) {
+        std::cerr << "Failed to create log directory: " << qPrintable(logDir) << std::endl;
     }
-
+    QString logFilePath = logDir + "/" + QDateTime::currentDateTime().toString("yyyy-MM-dd_HH-mm-ss") + ".log";
     g_logFile = new QFile(logFilePath);
     if (g_logFile->open(QIODevice::WriteOnly | QIODevice::Append | QIODevice::Text)) {
-        qInfo() << "Successfully opened log file:" << logFilePath;
+        qInstallMessageHandler(customMessageOutput);
+        qInfo() << "Log file opened:" << logFilePath;
     } else {
         qCritical("Failed to open log file: %s. Error: %s", qPrintable(logFilePath), qPrintable(g_logFile->errorString()));
         delete g_logFile; 
@@ -208,10 +95,28 @@ int main(int argc, char *argv[])
     QSettings settings; 
     qInfo() << "Settings file for this instance will be at:" << settings.fileName();
 
-    // 新增：显示登录对话框
+    // 显示登录对话框
     LoginDialog loginDialog;
-    loginDialog.setWindowIcon(QIcon(":/icons/app_logo.ico")); // 可选：为登录对话框设置图标
-    if (loginDialog.exec() != QDialog::Accepted) {
+    loginDialog.setWindowIcon(QIcon(":/icons/app_logo.ico")); 
+    
+    QString loggedInUserIdStr; // 用于存储成功登录的用户ID
+
+    if (loginDialog.exec() == QDialog::Accepted) {
+        loggedInUserIdStr = loginDialog.getLoggedInUserId(); // 从LoginDialog获取用户ID
+        if (loggedInUserIdStr.isEmpty()) {
+            qCritical() << "Login was accepted, but no User ID was returned. Exiting.";
+            // 清理操作
+            if (g_logFile) {
+                if (g_logFile->isOpen()) {
+                    g_logFile->close();
+                }
+                delete g_logFile;
+                g_logFile = nullptr;
+            }
+            return 1;
+        }
+        qInfo() << "Login successful for User ID:" << loggedInUserIdStr;
+    } else {
         qInfo() << "Login cancelled or failed. Exiting application.";
         // 清理操作与应用程序正常退出时相同
         if (g_logFile) {
@@ -221,21 +126,14 @@ int main(int argc, char *argv[])
             delete g_logFile;
             g_logFile = nullptr;
         }
-        if (g_instanceLockMemory) {
-            if (g_instanceLockMemory->isAttached()) {
-                g_instanceLockMemory->detach();
-            }
-            delete g_instanceLockMemory;
-            g_instanceLockMemory = nullptr;
-        }
         return 0; // 用户未登录，退出应用
     }
 
     qInfo() << "Login successful. Attempting to construct MainWindow...";
-    MainWindow w;
+    MainWindow w(loggedInUserIdStr); // 将登录的用户ID传递给MainWindow
     qInfo() << "MainWindow constructed. Attempting to show...";
-    w.setWindowIcon(QIcon(":/icons/app_logo.ico")); // 新增：设置窗口图标
-    w.setWindowTitle(QString("%1 - By CCZU_ZX").arg(QCoreApplication::applicationName()));
+    w.setWindowIcon(QIcon(":/icons/app_logo.ico")); 
+    w.setWindowTitle(QString("%1 (User: %2) - By CCZU_ZX").arg(QCoreApplication::applicationName()).arg(loggedInUserIdStr)); // 标题栏显示用户名
     w.show();
     qInfo() << "MainWindow show() called.";
 
@@ -244,31 +142,14 @@ int main(int argc, char *argv[])
     qInfo() << "Application instance" << QCoreApplication::applicationName() << "finished with exit code" << result;
 
     // Cleanup
-    // 1. Uninstall the custom message handler.
-    //    This prevents further calls to customMessageOutput, especially during Qt objects' destruction.
     qInstallMessageHandler(nullptr);
-
-    // 2. Close and delete the global log file.
     if (g_logFile) {
-        // Any qInfo/qDebug after qInstallMessageHandler(nullptr) will go to console or default handler,
-        // not customMessageOutput, so it's safe to log here if needed, but generally not necessary.
         if (g_logFile->isOpen()) {
             g_logFile->close();
         }
         delete g_logFile;
         g_logFile = nullptr;
     }
-
-    // 3. Release shared memory.
-    if (g_instanceLockMemory) {
-        if (g_instanceLockMemory->isAttached()) {
-            g_instanceLockMemory->detach();
-        }
-        delete g_instanceLockMemory;
-        g_instanceLockMemory = nullptr;
-    }
     
-    // MainWindow w and QApplication a will be destructed after main returns.
-    // By this point, the custom logger is disabled, preventing crashes related to it.
     return result;
 }

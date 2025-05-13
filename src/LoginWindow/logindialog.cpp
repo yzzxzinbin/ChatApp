@@ -19,13 +19,16 @@
 #include <QTextDocument>     
 #include <QRegularExpression> 
 #include <QMessageBox> // New: For showing messages
+#include <QSettings> // For saving UUID and password backup
+#include <QUuid>     // For generating UUID
 
 LoginDialog::LoginDialog(QWidget *parent)
     : QDialog(parent), m_dragging(false), 
       forgotPasswordUnderlineContainer(nullptr), 
       forgotPasswordUnderline(nullptr),
       underlineAnimation(nullptr),
-      m_dbManager(new DatabaseManager(this)) // New: Initialize DatabaseManager
+      m_dbManager(new DatabaseManager(this)), 
+      m_loggedInUserIdStr("") // 初始化
 {
     // 首先初始化颜色成员变量
     forgotPasswordNormalColor = QColor(Qt::darkGray).lighter(130); 
@@ -34,7 +37,6 @@ LoginDialog::LoginDialog(QWidget *parent)
 
     setWindowFlags(Qt::FramelessWindowHint | Qt::Dialog);
     setAttribute(Qt::WA_TranslucentBackground, true);
-    setAttribute(Qt::WA_DeleteOnClose);
 
     setupUi(); // 然后调用 setupUi
     applyStyles();
@@ -55,11 +57,27 @@ LoginDialog::LoginDialog(QWidget *parent)
 
 LoginDialog::~LoginDialog()
 {
+    qInfo() << "LoginDialog destructor: Stopping animations.";
+    if (underlineAnimation) {
+        underlineAnimation->stop();
+        // underlineAnimation is parented to 'this', Qt will delete it.
+    }
+    if (buttonWidthAnimationGroup) {
+        buttonWidthAnimationGroup->stop();
+        // buttonWidthAnimationGroup and its children are parented, Qt will delete them.
+    }
+    // QVariantAnimations in eventFilter are set to DeleteWhenStopped.
+    // If the dialog is deleted while they are running, their lambdas are risky.
+    // No direct way to stop them here as they are created on-the-fly in eventFilter.
+    // The QPointer fix below is more robust for those.
+
+    qInfo() << "LoginDialog destructor: Animations stopped. m_dbManager will be deleted by Qt's parent-child mechanism.";
     // m_dbManager is a child of LoginDialog, Qt will handle its deletion.
-    // Or, if you want explicit disconnect:
-    // if (m_dbManager) {
-    //     m_dbManager->disconnectFromDatabase();
-    // }
+}
+
+QString LoginDialog::getLoggedInUserId() const
+{
+    return m_loggedInUserIdStr;
 }
 
 void LoginDialog::onLoginClicked()
@@ -78,7 +96,18 @@ void LoginDialog::onLoginClicked()
     }
 
     if (m_dbManager->validateUser(username, password)) {
+        QSettings settings;
+        QString activeSessionKey = QString("ActiveSessions/%1").arg(username);
+        if (settings.value(activeSessionKey, false).toBool()) {
+            QMessageBox::warning(this, tr("Login Failed"), tr("User '%1' is already logged in on another instance.").arg(username));
+            return;
+        }
+
+        settings.setValue(activeSessionKey, true);
+        settings.sync();
+
         QMessageBox::information(this, tr("Login Successful"), tr("Welcome, %1!").arg(username));
+        m_loggedInUserIdStr = username; // 存储成功登录的ID
         accept();
     } else {
         // Check if user exists to give a more specific error
@@ -99,28 +128,58 @@ void LoginDialog::onSignUpClicked()
         return;
     }
 
-    QString username = usernameEdit->text().trimmed();
+    QString userIdStr = usernameEdit->text().trimmed(); 
     QString password = passwordEdit->text();
 
-    if (username.isEmpty() || password.isEmpty()) {
-        QMessageBox::warning(this, tr("Sign Up Failed"), tr("Username and password cannot be empty."));
+    if (userIdStr.isEmpty() || password.isEmpty()) {
+        QMessageBox::warning(this, tr("Sign Up Failed"), tr("User ID and password cannot be empty."));
         return;
     }
     
-    // Basic validation (you'd add more robust checks here)
-    if (password.length() < 6) {
+    // 前端用户ID重复检查 (基于QSettings)
+    QSettings checkSettings;
+    QString userProfilePath = QString("UserAccounts/%1/Profile/uuid").arg(userIdStr);
+    if (checkSettings.contains(userProfilePath)) {
+        QMessageBox::warning(this, tr("Sign Up Failed"), tr("User ID '%1' is already registered locally. Please choose a different User ID or log in.").arg(userIdStr));
+        usernameEdit->setFocus();
+        return;
+    }
+
+    bool ok;
+    userIdStr.toInt(&ok); 
+    if (!ok) {
+        QMessageBox::warning(this, tr("Sign Up Failed"), tr("User ID must be an integer."));
+        usernameEdit->setFocus();
+        return;
+    }
+
+    if (password.length() < 6) { 
         QMessageBox::warning(this, tr("Sign Up Failed"), tr("Password must be at least 6 characters long."));
         return;
     }
 
-    if (m_dbManager->addUser(username, password)) {
-        QMessageBox::information(this, tr("Sign Up Successful"), tr("User '%1' created successfully. You can now log in.").arg(username));
+    if (m_dbManager->addUser(userIdStr, password)) {
+        // SQL添加成功后，在注册表中创建用户配置
+        QSettings settings;
+        QString userGroup = "UserAccounts/" + userIdStr;
+        settings.beginGroup(userGroup + "/Profile");
+        QString newUuid = QUuid::createUuid().toString(QUuid::WithoutBraces);
+        settings.setValue("uuid", newUuid);
+        settings.setValue("localUserName", userIdStr); // 默认用户名
+        // !!重要: 存储密码备份 (理想情况下应哈希)
+        // 为了简单起见，这里存储明文，但实际应用中应使用强哈希算法
+        // 例如: settings.setValue("passwordHash", YourPasswordHasher::hash(password));
+        settings.setValue("passwordBackup", password); 
+        settings.endGroup();
+        settings.sync(); // 确保写入
+
+        qInfo() << "User ID" << userIdStr << "registered. Profile with UUID" << newUuid << "created in QSettings.";
+
+        QMessageBox::information(this, tr("Sign Up Successful"), tr("User ID '%1' created successfully. You can now log in.").arg(userIdStr));
         usernameEdit->clear();
         passwordEdit->clear();
     } else {
-        // DatabaseManager emits errorOccurred signal which is connected to showDatabaseError
-        // Or you can retrieve a more specific error if addUser returned it.
-        // For now, relying on the signal.
+        // Error message is handled by showDatabaseError slot via errorOccurred signal
     }
 }
 
@@ -302,6 +361,9 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
             return QDialog::eventFilter(watched, event);
         }
 
+        // 使用 QPointer 包装 'this' 以在 lambda 中安全访问
+        QPointer<LoginDialog> weakThis = this;
+
         // 每次都从 forgotPasswordUnderlineContainer 获取宽度，以防万一标签文本动态改变（虽然本例中不常见）
         int textWidth = forgotPasswordUnderlineContainer->width(); 
         if (textWidth <= 0) textWidth = 100; // Absolute fallback
@@ -316,10 +378,12 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
             QPalette currentPalette = forgotPasswordLabel->palette();
             textColorAnim->setStartValue(currentPalette.color(QPalette::WindowText));
             textColorAnim->setEndValue(forgotPasswordHoverColor);
-            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
-                QPalette palette = forgotPasswordLabel->palette();
+            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [weakThis](const QVariant &value) {
+                if (!weakThis) return; // 如果 LoginDialog 已销毁，则返回
+                if (!weakThis->forgotPasswordLabel) return; // 如果标签已销毁，则返回
+                QPalette palette = weakThis->forgotPasswordLabel->palette();
                 palette.setColor(QPalette::WindowText, value.value<QColor>());
-                forgotPasswordLabel->setPalette(palette);
+                weakThis->forgotPasswordLabel->setPalette(palette);
             });
             textColorAnim->start(QAbstractAnimation::DeleteWhenStopped);
 
@@ -342,10 +406,12 @@ bool LoginDialog::eventFilter(QObject *watched, QEvent *event)
             QPalette currentPalette = forgotPasswordLabel->palette();
             textColorAnim->setStartValue(currentPalette.color(QPalette::WindowText));
             textColorAnim->setEndValue(forgotPasswordNormalColor);
-            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [this](const QVariant &value) {
-                QPalette palette = forgotPasswordLabel->palette();
+            connect(textColorAnim, &QVariantAnimation::valueChanged, this, [weakThis](const QVariant &value) {
+                if (!weakThis) return; // 如果 LoginDialog 已销毁，则返回
+                if (!weakThis->forgotPasswordLabel) return; // 如果标签已销毁，则返回
+                QPalette palette = weakThis->forgotPasswordLabel->palette();
                 palette.setColor(QPalette::WindowText, value.value<QColor>());
-                forgotPasswordLabel->setPalette(palette);
+                weakThis->forgotPasswordLabel->setPalette(palette);
             });
             textColorAnim->start(QAbstractAnimation::DeleteWhenStopped);
 
