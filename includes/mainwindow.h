@@ -72,6 +72,8 @@ private slots: // 将这些声明为 private slots
                                quint16 outgoingPort, bool useSpecificOutgoingPortVal,
                                bool enableUdpDiscovery, quint16 udpDiscoveryPort,
                                bool enableContinuousUdpBroadcast, int udpBroadcastInterval);
+    void handleRetryListenNowRequested(); // 新增槽
+    void handleManualUdpBroadcastRequested(); // 新增槽
 
 private:
     // Declare widgets and layouts

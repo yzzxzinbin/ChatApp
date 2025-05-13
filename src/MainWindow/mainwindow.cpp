@@ -308,46 +308,29 @@ void MainWindow::onSettingsButtonClicked()
     if (m_currentUserIdStr.isEmpty())
         return;
 
-    // 从 QSettings 加载最新的用户配置以传递给 SettingsDialog 构造函数
-    QSettings settings;
-    QString profileGroup = "UserAccounts/" + m_currentUserIdStr + "/Profile";
-    QString userSettingsGroup = "UserAccounts/" + m_currentUserIdStr + "/Settings";
-
-    settings.beginGroup(profileGroup);
-    QString currentRegUserName = settings.value("localUserName", m_currentUserIdStr).toString();
-    QString currentRegUuid = settings.value("uuid").toString();
-    settings.endGroup();
-
-    settings.beginGroup(userSettingsGroup);
-    quint16 currentRegListenPort = settings.value("ListenPort", localListenPort).toUInt();
-    bool currentRegAutoListen = settings.value("AutoNetworkListeningEnabled", autoNetworkListeningEnabled).toBool();
-    quint16 currentRegOutgoingPort = settings.value("OutgoingPort", localOutgoingPort).toUInt();
-    bool currentRegUseSpecificOutgoing = settings.value("UseSpecificOutgoingPort", useSpecificOutgoingPort).toBool();
-    bool currentRegUdpDiscovery = settings.value("UdpDiscoveryEnabled", udpDiscoveryEnabled).toBool();
-    quint16 currentRegUdpPort = settings.value("UdpDiscoveryPort", localUdpDiscoveryPort).toUInt();
-    bool currentRegUdpContinuous = settings.value("UdpContinuousBroadcastEnabled", udpContinuousBroadcastEnabled).toBool();
-    int currentRegUdpInterval = settings.value("UdpBroadcastIntervalSeconds", udpBroadcastIntervalSeconds).toInt();
-    settings.endGroup();
-
+    // 使用 MainWindow 当前的成员变量来初始化或更新 SettingsDialog
+    // 这是旧版稳定代码的行为，确保对话框反映应用的当前状态。
     if (!settingsDialog)
     {
-        // 使用加载的设置值构造 SettingsDialog
-        settingsDialog = new SettingsDialog(currentRegUserName, currentRegUuid,
-                                            currentRegListenPort, currentRegAutoListen,
-                                            currentRegOutgoingPort, currentRegUseSpecificOutgoing,
-                                            currentRegUdpDiscovery, currentRegUdpPort,
-                                            currentRegUdpContinuous, currentRegUdpInterval,
+        settingsDialog = new SettingsDialog(localUserName, localUserUuid,
+                                            localListenPort, autoNetworkListeningEnabled,
+                                            localOutgoingPort, useSpecificOutgoingPort,
+                                            udpDiscoveryEnabled, localUdpDiscoveryPort,
+                                            udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds,
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
-        // 如果 SettingsDialog 构造函数已经用这些值初始化了其内部字段，
-        // 那么下面的 updateFields 调用可能不再需要，或者 SettingsDialog 内部需要相应调整。
-        // 为保持与之前逻辑一致，暂时保留 updateFields，但理想情况下构造时就应设置好。
+        connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNowRequested);
+        connect(settingsDialog, &SettingsDialog::manualUdpBroadcastRequested, this, &MainWindow::handleManualUdpBroadcastRequested);
     }
-    // 确保对话框显示的是最新的值
-    settingsDialog->updateFields(currentRegUserName, currentRegUuid, currentRegListenPort, currentRegAutoListen,
-                                 currentRegOutgoingPort, currentRegUseSpecificOutgoing,
-                                 currentRegUdpDiscovery, currentRegUdpPort,
-                                 currentRegUdpContinuous, currentRegUdpInterval);
+    else
+    {
+        // 如果对话框已存在，用当前 MainWindow 的成员变量更新其字段
+        settingsDialog->updateFields(localUserName, localUserUuid,
+                                     localListenPort, autoNetworkListeningEnabled,
+                                     localOutgoingPort, useSpecificOutgoingPort,
+                                     udpDiscoveryEnabled, localUdpDiscoveryPort,
+                                     udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
+    }
     settingsDialog->exec();
 }
 
@@ -382,6 +365,29 @@ void MainWindow::saveChatHistory(const QString &peerUuid)
     }
 }
 
+// 新增槽函数实现
+void MainWindow::handleRetryListenNowRequested()
+{
+    if (networkManager) {
+        updateNetworkStatus(tr("Attempting to start listening manually..."));
+        networkManager->startListening(); // 这个方法应该会发出成功或失败的状态消息
+    } else {
+        updateNetworkStatus(tr("NetworkManager is not available. Cannot start listening."));
+    }
+}
+
+// 新增槽函数实现
+void MainWindow::handleManualUdpBroadcastRequested()
+{
+    if (networkManager) {
+        updateNetworkStatus(tr("Attempting to send manual UDP discovery broadcast...")); // 添加此行
+        // NetworkManager::triggerManualUdpBroadcast 内部会发出更详细的状态消息
+        networkManager->triggerManualUdpBroadcast();
+    } else {
+        updateNetworkStatus(tr("NetworkManager is not available. Cannot send UDP broadcast."));
+    }
+}
+ 
 void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *previous)
 {
     Q_UNUSED(previous);
@@ -743,8 +749,8 @@ void MainWindow::loadContactsAndAttemptReconnection()
         if (!found)
         {
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
-            item->setData(Qt::UserRole, uuid);
-            item->setData(Qt::UserRole + 1, ip);
+            item->setData(Qt::UserRole, uuid);     // Store UUID
+            item->setData(Qt::UserRole + 1, ip);   // Store IP
             item->setData(Qt::UserRole + 2, savedContactPort); // 保存端口
             item->setIcon(QIcon(":/icons/offline.svg"));
         }
