@@ -295,16 +295,27 @@ void MainWindow::handleSettingsApplied(const QString &userName,
     if (settingsChanged)
     {
         settings.sync();
-        updateNetworkStatus(tr("Settings applied and saved."));
     }
+
     if (listeningPrefsChanged && networkManager)
     {
         networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     }
+    else if (!settingsChanged && !udpDiscoveryPrefsChanged)
+    {
+        if (!listeningPrefsChanged && !udpDiscoveryPrefsChanged && !settingsChanged) {
+            updateNetworkStatus(tr("Settings unchanged."));
+        }
+    }
+
     if (udpDiscoveryPrefsChanged && networkManager)
     {
         networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort,
                                                    udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
+    }
+
+    if (settingsChanged) {
+        updateNetworkStatus(tr("Settings have been saved. Network status will update based on changes."));
     }
 }
 

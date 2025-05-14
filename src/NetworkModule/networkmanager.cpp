@@ -377,19 +377,66 @@ void NetworkManager::setLocalUserDetails(const QString& uuid, const QString& dis
 
 void NetworkManager::setListenPreferences(quint16 port, bool autoStartListen)
 {
+    bool portActuallyChanged = (preferredListenPort != port && port > 0);
+    quint16 oldPreferredListenPort = preferredListenPort;
     preferredListenPort = (port > 0) ? port : defaultPort;
+    // Ensure preferredListenPort is not 0 if it's supposed to be a valid port.
+    // If defaultPort itself could be 0, assign a fallback.
+    if (preferredListenPort == 0 && defaultPort == 0) preferredListenPort = 60248;
+    else if (preferredListenPort == 0) preferredListenPort = defaultPort;
+
     bool oldAutoStartListeningEnabled = autoStartListeningEnabled;
     autoStartListeningEnabled = autoStartListen;
 
-    if (!autoStartListeningEnabled) {
+    qDebug() << "NM::setListenPreferences: New Port:" << preferredListenPort << "(Old:" << oldPreferredListenPort << ", Changed:" << portActuallyChanged << ")"
+             << "New AutoStart:" << autoStartListeningEnabled << "(Old:" << oldAutoStartListeningEnabled << ")";
+
+    if (!autoStartListeningEnabled) { // If listening is being disabled or kept disabled
         if (tcpServer && tcpServer->isListening()) {
-            stopListening();
+            qDebug() << "NM::setListenPreferences: AutoStart disabled, server is listening. Stopping server.";
+            stopListening(); // This also stops the retry timer
         } else if (retryListenTimer && retryListenTimer->isActive()) {
+            qDebug() << "NM::setListenPreferences: AutoStart disabled, retry timer active. Stopping timer.";
             retryListenTimer->stop();
-            emit serverStatusMessage(tr("Network listening disabled by user. Retry stopped."));
+            emit serverStatusMessage(tr("Network listening disabled. Retry timer stopped."));
+        } else {
+            qDebug() << "NM::setListenPreferences: AutoStart remains disabled. No server/timer action.";
+            emit serverStatusMessage(tr("Network listening is disabled in settings."));
         }
-    } else if (autoStartListeningEnabled && !oldAutoStartListeningEnabled && (!tcpServer || !tcpServer->isListening())) {
-        emit serverStatusMessage(tr("Network listening enabled. Will attempt to start if not already running."));
+    } else { // autoStartListeningEnabled is true (listening is being enabled or kept enabled)
+        bool serverIsCurrentlyListening = (tcpServer && tcpServer->isListening());
+        quint16 currentListeningPort = serverIsCurrentlyListening ? tcpServer->serverPort() : 0;
+
+        if (!oldAutoStartListeningEnabled) { // Auto-start was just turned ON
+            if (!serverIsCurrentlyListening) {
+                qDebug() << "NM::setListenPreferences: AutoStart just enabled, server not running. Attempting to start.";
+                startListening(); // This will use the new preferredListenPort
+            } else { // Server is already running, but auto-start was off. Now it's on.
+                if (portActuallyChanged && currentListeningPort != preferredListenPort) {
+                    qDebug() << "NM::setListenPreferences: AutoStart just enabled, server running on old port, port changed. Restarting.";
+                    emit serverStatusMessage(tr("Port changed from %1 to %2. Restarting listener...").arg(currentListeningPort).arg(preferredListenPort));
+                    stopListening();
+                    startListening();
+                } else {
+                    qDebug() << "NM::setListenPreferences: AutoStart just enabled, server already running on correct port %1.", currentListeningPort;
+                    emit serverStatusMessage(tr("Network listening enabled. Server already running on port %1.").arg(currentListeningPort));
+                }
+            }
+        } else { // Auto-start was already ON and remains ON
+            if (serverIsCurrentlyListening) {
+                if (portActuallyChanged && currentListeningPort != preferredListenPort) {
+                    qDebug() << "NM::setListenPreferences: AutoStart ON, server running, port changed. Restarting.";
+                    emit serverStatusMessage(tr("Port changed from %1 to %2. Restarting listener...").arg(currentListeningPort).arg(preferredListenPort));
+                    stopListening();
+                    startListening();
+                } else {
+                    qDebug() << "NM::setListenPreferences: AutoStart ON, server running on correct port %1. No port change.", currentListeningPort;
+                }
+            } else { // Auto-start is ON, but server is not running (e.g., previous attempts failed or was stopped manually)
+                qDebug() << "NM::setListenPreferences: AutoStart ON, server not running. Attempting to start.";
+                startListening();
+            }
+        }
     }
 }
 
