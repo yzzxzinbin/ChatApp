@@ -392,6 +392,23 @@ void MainWindow::handleManualUdpBroadcastRequested()
         updateNetworkStatus(tr("NetworkManager is not available. Cannot send UDP broadcast."));
     }
 }
+
+// 新增槽函数实现
+void MainWindow::onMessageInputTextChanged()
+{
+    if (clearMessageButton && messageInputEdit) {
+        clearMessageButton->setVisible(!messageInputEdit->toPlainText().isEmpty());
+    }
+}
+
+// 新增槽函数实现
+void MainWindow::onClearMessageInputClicked()
+{
+    if (messageInputEdit) {
+        messageInputEdit->clear();
+        messageInputEdit->setFocus(); // Optional: return focus to the input edit
+    }
+}
  
 void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *previous)
 {

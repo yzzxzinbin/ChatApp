@@ -142,7 +142,29 @@ void MainWindow::setupUI()
     messageInputEdit->setPlaceholderText("Type your message...");
     messageInputEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding); // 自动伸展
     messageInputEdit->setMaximumHeight(120);
-    inputAreaLayout->addWidget(messageInputEdit, 1);
+
+    // Create clear button for message input
+    clearMessageButton = new QPushButton(this);
+    clearMessageButton->setObjectName("clearMessageButton");
+    clearMessageButton->setText("X"); // Placeholder if no icon
+    clearMessageButton->setIconSize(QSize(12, 12));
+    clearMessageButton->setFixedSize(22, 22);
+    clearMessageButton->setCursor(Qt::PointingHandCursor);
+    clearMessageButton->setToolTip(tr("Clear input"));
+    clearMessageButton->setVisible(false); // Initially hidden
+    clearMessageButton->setFlat(true);
+
+    // Wrapper for messageInputEdit and clearMessageButton
+    QWidget *inputEditContainer = new QWidget(this);
+    inputEditContainer->setObjectName("messageInputWrapper"); // <--- 添加对象名
+    QHBoxLayout *inputEditContainerLayout = new QHBoxLayout(inputEditContainer);
+    inputEditContainerLayout->setContentsMargins(0, 0, 0, 0); // 容器内部边距为0
+    inputEditContainerLayout->setSpacing(0); // 文本框和清除按钮之间无间距
+    inputEditContainerLayout->addWidget(messageInputEdit, 1); 
+    inputEditContainerLayout->addWidget(clearMessageButton);
+    inputEditContainer->setLayout(inputEditContainerLayout);
+
+    inputAreaLayout->addWidget(inputEditContainer, 1); // Add container instead of messageInputEdit directly
 
     // 创建辅助按钮区域
     buttonsWidget = new QWidget(this);
@@ -219,6 +241,10 @@ void MainWindow::setupUI()
     // Connect handler's color change signals back to MainWindow to update stored colors
     connect(formattingHandler, &FormattingToolbarHandler::textColorChanged, this, &MainWindow::handleTextColorChanged);
     connect(formattingHandler, &FormattingToolbarHandler::backgroundColorChanged, this, &MainWindow::handleBackgroundColorChanged);
+
+    // Connect signals for the new clear input button
+    connect(messageInputEdit, &QTextEdit::textChanged, this, &MainWindow::onMessageInputTextChanged);
+    connect(clearMessageButton, &QPushButton::clicked, this, &MainWindow::onClearMessageInputClicked);
 
     QTextCharFormat initialFormat; // 初始化文本属性
     if (fontFamilyComboBox->currentFont().pointSize() > 0)

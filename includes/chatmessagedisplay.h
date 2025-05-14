@@ -6,7 +6,6 @@
 #include <QWidget>
 #include <QLabel>
 #include <QList>
-#include <QTimer> // 新增：包含 QTimer
 
 class ChatMessageDisplay : public QScrollArea
 {

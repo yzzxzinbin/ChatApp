@@ -173,13 +173,42 @@ QString getApplicationStyleSheet()
             padding: 2px;
         }
 
-        #messageInputEdit {
+        /* Styles for the wrapper around message input and its clear button */
+        #messageInputWrapper {
             background-color: #ffffff;
-            border: 1px solid #e0e0e0;
+            border: 1px solid #d0d0d0; /* Border for the entire input area */
             border-radius: 6px;
-            padding: 8px;
+            /* QHBoxLayout inside has margins 0, spacing 0 */
+        }
+
+        /* QTextEdit when inside the messageInputWrapper */
+        #messageInputWrapper > QTextEdit#messageInputEdit {
+            border: none; /* Remove individual border from QTextEdit */
+            background-color: transparent; /* Make QTextEdit background transparent */
+            padding: 8px; /* Internal padding for the text */
             font-size: 14px;
             color: #333333;
+        }
+
+        /* Clear button when inside the messageInputWrapper */
+        #messageInputWrapper > QPushButton#clearMessageButton {
+            border: none;
+            background-color: transparent;
+            color: #7f8c8d; /* Icon/Text color */
+            font-weight: bold; /* If using text 'X' */
+            /* Fixed size is set in code (22x22) */
+            /* Icon size is set in code (12x12), it will be centered */
+            padding: 0px; /* No internal padding for the button itself */
+            margin: 0px 4px 0px 2px; /* top, right, bottom, left margins for the button */
+                                     /* Adds a little space around the button */
+            border-radius: 11px; /* Optional: if you want the button hover to be round */
+        }
+        #messageInputWrapper > QPushButton#clearMessageButton:hover {
+            background-color: #f0f0f0; 
+            color: #333333;
+        }
+        #messageInputWrapper > QPushButton#clearMessageButton:pressed {
+            background-color: #e0e0e0;
         }
 
         #sendButton, #clearButton, #closeChatButton {

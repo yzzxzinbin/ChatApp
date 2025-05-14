@@ -10,14 +10,12 @@
 #include <QSettings>   // For storing UUID
 #include <QKeyEvent>   // 新增：包含 QKeyEvent
 #include <QTcpSocket>
-#include "chatmessagedisplay.h" // 添加自定义组件头文件
-#include "networkmanager.h"     // Include NetworkManager
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
 class QListWidgetItem;
-class QTextEdit;
-class QPushButton;
+class QTextEdit; // 前向声明
+class QPushButton; // 前向声明
 class QVBoxLayout;
 class QHBoxLayout;
 class QWidget;
@@ -25,7 +23,11 @@ class QFontComboBox;
 class QComboBox;
 class QTextCharFormat; // For formatting
 class QColor;          // For color selection
+QT_END_NAMESPACE
 
+// 自定义类的前向声明
+class ChatMessageDisplay;       // 前向声明
+class NetworkManager;           // 前向声明
 class ContactManager;
 class SettingsDialog;           // Forward declaration
 class PeerInfoWidget;           // Forward declaration for our new widget
@@ -33,7 +35,6 @@ class FormattingToolbarHandler; // Forward declaration for the new handler
 class NetworkEventHandler;      // Forward declaration for network event handler
 class ChatHistoryManager;       // 新增：前向声明 ChatHistoryManager
 class MySqlDatabase;            // 新增：前向声明 MySqlDatabase
-QT_END_NAMESPACE
 
 class MainWindow : public QMainWindow
 {
@@ -75,6 +76,10 @@ private slots: // 将这些声明为 private slots
     void handleRetryListenNowRequested(); // 新增槽
     void handleManualUdpBroadcastRequested(); // 新增槽
 
+    // 新增：编辑区清除按钮的槽函数声明
+    void onMessageInputTextChanged();
+    void onClearMessageInputClicked();
+
 private:
     // Declare widgets and layouts
     QWidget *centralWidget;
@@ -95,7 +100,7 @@ private:
     QVBoxLayout *activeChatContentsLayout;
 
     // 使用自定义组件显示消息历史
-    ChatMessageDisplay *messageDisplay;
+    ChatMessageDisplay *messageDisplay; // 指针，使用前向声明即可
 
     QWidget *formattingToolbarWidget;
     QHBoxLayout *formattingToolbarLayout;
@@ -111,19 +116,20 @@ private:
 
     QWidget *inputAreaWidget;
     QHBoxLayout *inputAreaLayout;
-    QTextEdit *messageInputEdit;
+    QTextEdit *messageInputEdit; // 指针，使用前向声明即可
 
     QWidget *buttonsWidget;
     QVBoxLayout *buttonsLayout;
-    QPushButton *sendButton;
-    QPushButton *clearButton;
-    QPushButton *closeChatButton;
+    QPushButton *sendButton; // 指针，使用前向声明即可
+    QPushButton *clearButton; // 指针，使用前向声明即可
+    QPushButton *closeChatButton; // 指针，使用前向声明即可
+    QPushButton *clearMessageButton; // 新增：编辑区清除按钮的指针声明
 
     QLabel *emptyChatPlaceholderLabel;
     QLabel *networkStatusLabel; // For displaying network status
 
     ContactManager *contactManager;
-    NetworkManager *networkManager; // NetworkManager instance
+    NetworkManager *networkManager; // 指针，使用前向声明即可
     SettingsDialog *settingsDialog; // 设置对话框实例
 
     // Data members for chat history and current contact
