@@ -5,8 +5,14 @@
 #include <QMap>
 #include <QFile>
 #include <QTimer>
+#include <QSet> // For receivedOutOfOrderChunks keys
 
 class NetworkManager; // Forward declaration
+
+// Sliding Window Configuration
+const int DEFAULT_SEND_WINDOW_SIZE = 5; // Send up to 5 chunks before waiting for ACK for the first one
+const int DEFAULT_RECEIVE_WINDOW_SIZE = 10; // Receiver can buffer up to 10 out-of-order chunks
+const int FT_CHUNK_RETRANSMISSION_TIMEOUT_MS = 10000; // Timeout for retransmitting the base of the send window
 
 struct FileTransferSession {
     QString transferID;
@@ -16,12 +22,36 @@ struct FileTransferSession {
     QFile* file; // Represents the open file handle
     QString localFilePath; // Full path for sending, or chosen save path for receiving
     bool isSender;
-    enum State { Idle, Offered, Accepted, Transferring, WaitingForAck, Completed, Rejected, Error } state;
-    qint64 bytesTransferred;
-    qint64 currentChunkID; // For sender: next chunk to send. For receiver: next chunk expected.
+    enum State { Idle, Offered, Accepted, Transferring, WaitingForAck, Completed, Rejected, Error, Paused } state; // Added Paused
+    qint64 bytesTransferred; // For sender: bytes ACKed. For receiver: bytes written to disk.
     qint64 totalChunks;    // Calculated when starting transfer
 
-    FileTransferSession() : fileSize(0), file(nullptr), isSender(false), state(Idle), bytesTransferred(0), currentChunkID(0), totalChunks(0) {}
+    // Sender specific for Sliding Window
+    qint64 sendWindowBase;          // Sequence number of the oldest unacknowledged chunk
+    qint64 nextChunkToSendInWindow; // Sequence number of the next new chunk to send within the current window pass
+    QTimer* retransmissionTimer;    // Timer for retransmitting sendWindowBase if not ACKed
+
+    // Receiver specific for Sliding Window
+    qint64 highestContiguousChunkReceived; // Highest chunk ID received and written in order
+    QMap<qint64, QByteArray> receivedOutOfOrderChunks; // Buffer for out-of-order chunks
+
+    FileTransferSession() : 
+        fileSize(0), file(nullptr), isSender(false), state(Idle), bytesTransferred(0), 
+        totalChunks(0), sendWindowBase(0), nextChunkToSendInWindow(0), 
+        retransmissionTimer(nullptr), highestContiguousChunkReceived(-1) {}
+
+    // Helper to clean up timer
+    void stopAndClearRetransmissionTimer() {
+        if (retransmissionTimer) {
+            retransmissionTimer->stop();
+            delete retransmissionTimer;
+            retransmissionTimer = nullptr;
+        }
+    }
+    ~FileTransferSession() {
+        stopAndClearRetransmissionTimer();
+        // QFile* file is managed by FileTransferManager's cleanupSession
+    }
 };
 
 class FileTransferManager : public QObject
@@ -53,21 +83,20 @@ signals:
 
 private slots:
     // Internal slots for managing transfers, e.g., sending chunks, timeouts
-    void processNextChunk(const QString& transferID);
-    void handleTransferTimeout(const QString& transferID); // New for timeouts
+    void processSendQueue(const QString& transferID); // Renamed from processNextChunk, drives sending multiple chunks
+    void handleChunkRetransmissionTimeout(const QString& transferID); // Renamed from handleTransferTimeout
 
 private:
     NetworkManager* m_networkManager;
     QString m_localUserUuid;
     QMap<QString, FileTransferSession> m_sessions; // Key: TransferID
-    QMap<QString, QTimer*> m_transferTimers; // Key: TransferID, for ACK timeouts
 
     QString generateTransferID() const;
     void sendFileOffer(const QString& peerUuid, const QString& transferID, const QString& fileName, qint64 fileSize);
     void sendAcceptMessage(const QString& peerUuid, const QString& transferID, const QString& savePathHint); // Modified
     void sendRejectMessage(const QString& peerUuid, const QString& transferID, const QString& reason);
-    void sendChunk(const QString& transferID);
-    void sendDataAck(const QString& peerUuid, const QString& transferID, qint64 chunkID);
+    void sendChunkData(const QString& transferID, qint64 chunkID, const QByteArray& chunkData); // New helper
+    void sendDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID); // ackedChunkID is the highest contiguous received
     void sendEOF(const QString& transferID);
     void sendEOFAck(const QString& peerUuid, const QString& transferID);
     void sendError(const QString& peerUuid, const QString& transferID, const QString& errorCode, const QString& errorMessage);
@@ -76,7 +105,7 @@ private:
     void handleFileAccept(const QString& peerUuid, const QString& transferID, const QString& savePathHint); // Modified
     void handleFileReject(const QString& peerUuid, const QString& transferID, const QString& reason);
     void handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 chunkSize, const QByteArray& data);
-    void handleDataAck(const QString& peerUuid, const QString& transferID, qint64 chunkID);
+    void handleDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID); // ackedChunkID is the highest contiguous received by peer
     void handleEOF(const QString& peerUuid, const QString& transferID, qint64 totalChunks, const QString& finalChecksum);
     void handleEOFAck(const QString& peerUuid, const QString& transferID);
     void handleFileError(const QString& peerUuid, const QString& transferID, const QString& errorCode, const QString& message);
@@ -88,8 +117,11 @@ private:
     // Helper to extract attribute from simple XML-like string (can be moved to a utility class later)
     QString extractMessageAttribute(const QString& message, const QString& attributeName) const;
     void cleanupSession(const QString& transferID, bool success, const QString& message);
-    void startAckTimer(const QString& transferID);
-    void stopAckTimer(const QString& transferID);
+    void startRetransmissionTimer(const QString& transferID);
+    void stopRetransmissionTimer(const QString& transferID);
+
+    // Helper for receiver to process buffered chunks
+    void processBufferedChunks(const QString& transferID);
 };
 
 #endif // FILETRANSFERMANAGER_H
