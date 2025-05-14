@@ -37,6 +37,7 @@ class FormattingToolbarHandler; // Forward declaration for the new handler
 class NetworkEventHandler;      // Forward declaration for network event handler
 class ChatHistoryManager;       // 新增：前向声明 ChatHistoryManager
 class MySqlDatabase;            // 新增：前向声明 MySqlDatabase
+class FileTransferManager;      // <-- Add this
 
 class MainWindow : public QMainWindow
 {
@@ -58,6 +59,10 @@ protected:
 
 public slots:
     void handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port);
+    // Add slots for FileTransferManager signals if UI needs to react directly
+    void handleIncomingFileOffer(const QString& transferID, const QString& peerUuid, const QString& fileName, qint64 fileSize);
+    void updateFileTransferProgress(const QString& transferID, qint64 bytesTransferred, qint64 totalSize);
+    void handleFileTransferFinished(const QString& transferID, const QString& peerUuid, const QString& fileName, bool success, const QString& message);
 
 private slots: // 将这些声明为 private slots
     void onAddContactButtonClicked();
@@ -80,6 +85,7 @@ private slots: // 将这些声明为 private slots
     // 新增：编辑区清除按钮的槽函数声明
     void onMessageInputTextChanged();
     void onClearMessageInputClicked();
+    void onSendFileButtonClicked(); // <-- Add slot for send file button
 
 private:
     // Declare widgets and layouts
@@ -125,6 +131,7 @@ private:
     QPushButton *clearButton; // 指针，使用前向声明即可
     QPushButton *closeChatButton; // 指针，使用前向声明即可
     QPushButton *clearMessageButton; // 新增：编辑区清除按钮的指针声明
+    QPushButton *sendFileButton; // <-- Add send file button member
 
     QLabel *emptyChatPlaceholderLabel;
     QLabel *networkStatusLabel; // For displaying network status
@@ -153,6 +160,7 @@ private:
     PeerInfoWidget *peerInfoDisplayWidget;       // New widget instance
     FormattingToolbarHandler *formattingHandler; // New handler instance
     NetworkEventHandler *networkEventHandler;    // New network event handler instance
+    FileTransferManager *fileTransferManager;    // <-- Add FileTransferManager member
 
     QString m_currentUserIdStr; // 新增：存储当前登录的用户ID
 

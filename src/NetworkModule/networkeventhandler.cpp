@@ -3,6 +3,7 @@
 #include "mainwindow.h" // Include to access MainWindow methods/members
 #include "chatmessagedisplay.h"
 #include "peerinfowidget.h"
+#include "filetransfermanager.h" // <-- Add this
 
 #include <QListWidget>
 #include <QListWidgetItem> // Ensure QListWidgetItem is included
@@ -25,6 +26,7 @@ NetworkEventHandler::NetworkEventHandler(
     QWidget *activeChatWidget,
     QMap<QString, QStringList> *histories,
     MainWindow *mainWindow,
+    FileTransferManager *ftm, // <-- Add this
     QObject *parent)
     : QObject(parent),
       networkManager(nm),
@@ -36,8 +38,12 @@ NetworkEventHandler::NetworkEventHandler(
       emptyChatPlaceholderLabel(emptyPlaceholder),
       activeChatContentsWidget(activeChatWidget),
       chatHistories(histories),
-      mainWindowPtr(mainWindow)
+      mainWindowPtr(mainWindow),
+      fileTransferManager(ftm) // <-- Initialize this
 {
+    if (!fileTransferManager) {
+        qWarning() << "NetworkEventHandler initialized with a null FileTransferManager!";
+    }
 }
 
 void NetworkEventHandler::handlePeerConnected(const QString &peerUuid, const QString &peerName, const QString &peerAddress, quint16 peerPort)
@@ -146,6 +152,16 @@ void NetworkEventHandler::handlePeerDisconnected(const QString &peerUuid)
 void NetworkEventHandler::handleNewMessageReceived(const QString &peerUuid, const QString &message)
 {
     if (!mainWindowPtr || !networkManager || !chatHistories || !contactListWidget || !messageDisplay) return;
+
+    // Check if it's a file transfer message
+    if (message.startsWith("<FT_")) {
+        if (fileTransferManager) {
+            fileTransferManager->handleIncomingFileMessage(peerUuid, message);
+        } else {
+            qWarning() << "NEH: Received file transfer message but FileTransferManager is null:" << message;
+        }
+        return; // Message handled (or attempted to be handled) by FileTransferManager
+    }
 
     QListWidgetItem *contactItem = nullptr;
     QString contactName = tr("Unknown");

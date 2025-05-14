@@ -15,6 +15,7 @@ class QStackedWidget;
 class QTextEdit;
 class QLabel;
 class MainWindow; // Forward declaration
+class FileTransferManager; // Forward declaration
 QT_END_NAMESPACE
 
 class NetworkEventHandler : public QObject
@@ -33,6 +34,7 @@ public:
         QWidget *activeChatWidget,
         QMap<QString, QStringList> *histories,
         MainWindow *mainWindow, // To access certain MainWindow methods/properties
+        FileTransferManager *ftm, // To handle file transfers
         QObject *parent = nullptr);
 
 public slots:
@@ -52,6 +54,7 @@ private:
     QWidget *activeChatContentsWidget;
     QMap<QString, QStringList> *chatHistories; // Pointer to MainWindow's chatHistories
     MainWindow *mainWindowPtr; // Pointer to MainWindow instance
+    FileTransferManager *fileTransferManager; // Pointer to FileTransferManager instance
 };
 
 #endif // NETWORKEVENTHANDLER_H

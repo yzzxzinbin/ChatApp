@@ -178,6 +178,13 @@ void MainWindow::setupUI()
     sendButton->setObjectName("sendButton");
     sendButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
     connect(sendButton, &QPushButton::clicked, this, &MainWindow::onSendButtonClicked);
+    
+    // 新增：发送文件按钮
+    sendFileButton = new QPushButton(tr("Send File"), this);
+    sendFileButton->setObjectName("sendFileButton"); // 设置对象名以便应用样式
+    sendFileButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
+    connect(sendFileButton, &QPushButton::clicked, this, &MainWindow::onSendFileButtonClicked);
+
     clearButton = new QPushButton("Clear", this);
     clearButton->setObjectName("clearButton");
     clearButton->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Expanding);
@@ -189,6 +196,7 @@ void MainWindow::setupUI()
     connect(closeChatButton, &QPushButton::clicked, this, &QMainWindow::close);
     // 将按钮添加到按钮布局buttonsLayout中
     buttonsLayout->addWidget(sendButton, 1);
+    buttonsLayout->addWidget(sendFileButton, 1); // <-- 添加发送文件按钮到布局
     buttonsLayout->addWidget(clearButton, 1);
     buttonsLayout->addWidget(closeChatButton, 1);
 

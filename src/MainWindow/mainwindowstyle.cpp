@@ -211,7 +211,7 @@ QString getApplicationStyleSheet()
             background-color: #e0e0e0;
         }
 
-        #sendButton, #clearButton, #closeChatButton {
+        #sendButton, #clearButton, #closeChatButton, #sendFileButton {
             background-color: #0078d4;
             color: white;
             border: none;
@@ -219,10 +219,10 @@ QString getApplicationStyleSheet()
             font-size: 14px;
             border-radius: 5px;
         }
-        #sendButton:hover, #clearButton:hover, #closeChatButton:hover {
+        #sendButton:hover, #clearButton:hover, #closeChatButton:hover, #sendFileButton:hover {
             background-color: #005a9e;
         }
-        #sendButton:pressed, #clearButton:pressed, #closeChatButton:pressed {
+        #sendButton:pressed, #clearButton:pressed, #closeChatButton:pressed, #sendFileButton:pressed {
             background-color: #004578;
         }
         #clearButton {

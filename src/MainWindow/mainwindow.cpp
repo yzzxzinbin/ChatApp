@@ -8,6 +8,7 @@
 #include "formattingtoolbarhandler.h"
 #include "networkeventhandler.h"
 #include "chathistorymanager.h"
+#include "filetransfermanager.h" // <-- Add this
 
 #include <QApplication>
 #include <QListWidget>
@@ -33,6 +34,7 @@
 #include <QDebug>
 #include <QEvent>
 #include <QDateTime>
+#include <QFileDialog> // <-- Add this for file dialog
 
 MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     : QMainWindow(parent),
@@ -48,7 +50,8 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
       udpContinuousBroadcastEnabled(true),
       udpBroadcastIntervalSeconds(5),
       localOutgoingPort(0),
-      useSpecificOutgoingPort(false)
+      useSpecificOutgoingPort(false),
+      fileTransferManager(nullptr) // <-- Initialize to nullptr
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     loadCurrentUserIdentity();
@@ -60,13 +63,16 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
 
+    // Instantiate FileTransferManager AFTER NetworkManager and localUserUuid are set
+    fileTransferManager = new FileTransferManager(networkManager, localUserUuid, this); // <-- Instantiate this
+
     contactManager = new ContactManager(networkManager, this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
 
     currentTextColor = QColor(Qt::black);
     currentBgColor = QColor(Qt::transparent);
 
-    setupUI();
+    setupUI(); // sendFileButton will be created in setupUI
 
     networkEventHandler = new NetworkEventHandler(
         networkManager,
@@ -79,6 +85,7 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
         activeChatContentsWidget,
         &chatHistories,
         this,
+        fileTransferManager, // <-- Pass to NetworkEventHandler
         this);
 
     setWindowTitle("ChatApp - " + localUserName + "By CCZU_ZX");
@@ -91,6 +98,13 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     connect(networkManager, &NetworkManager::serverStatusMessage, this, &MainWindow::updateNetworkStatus);
     connect(networkManager, &NetworkManager::incomingSessionRequest, this, &MainWindow::handleIncomingConnectionRequest);
 
+    // Connect FileTransferManager signals to MainWindow slots
+    if (fileTransferManager) {
+        connect(fileTransferManager, &FileTransferManager::incomingFileOffer, this, &MainWindow::handleIncomingFileOffer);
+        connect(fileTransferManager, &FileTransferManager::fileTransferProgress, this, &MainWindow::updateFileTransferProgress);
+        connect(fileTransferManager, &FileTransferManager::fileTransferFinished, this, &MainWindow::handleFileTransferFinished);
+    }
+
     loadCurrentUserContacts();
 
     if (autoNetworkListeningEnabled)
@@ -102,8 +116,6 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
         updateNetworkStatus(tr("Network listening is disabled in settings."));
     }
 
-    // 然后设置并启动UDP发现。此时 tcpServer->isListening() 的状态是正确的。
-    // setUdpDiscoveryPreferences 内部会在启用时调用 startUdpDiscovery -> sendUdpBroadcast
     networkManager->setUdpDiscoveryPreferences(udpDiscoveryEnabled, localUdpDiscoveryPort, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
 }
 
@@ -124,6 +136,7 @@ MainWindow::~MainWindow()
         networkManager->stopUdpDiscovery();
         disconnect(networkManager, nullptr, nullptr, nullptr);
     }
+    // fileTransferManager will also be deleted by QObject parent system
 
     qDebug() << "MainWindow::~MainWindow() - Destruction finished.";
 }
@@ -321,8 +334,6 @@ void MainWindow::onSettingsButtonClicked()
     if (m_currentUserIdStr.isEmpty())
         return;
 
-    // 使用 MainWindow 当前的成员变量来初始化或更新 SettingsDialog
-    // 这是旧版稳定代码的行为，确保对话框反映应用的当前状态。
     if (!settingsDialog)
     {
         settingsDialog = new SettingsDialog(localUserName, localUserUuid,
@@ -337,7 +348,6 @@ void MainWindow::onSettingsButtonClicked()
     }
     else
     {
-        // 如果对话框已存在，用当前 MainWindow 的成员变量更新其字段
         settingsDialog->updateFields(localUserName, localUserUuid,
                                      localListenPort, autoNetworkListeningEnabled,
                                      localOutgoingPort, useSpecificOutgoingPort,
@@ -365,7 +375,6 @@ void MainWindow::saveChatHistory(const QString &peerUuid)
         if (!chatHistoryManager->saveChatHistory(peerUuid, chatHistories.value(peerUuid)))
         {
             qWarning() << "MainWindow: Failed to save chat history via ChatHistoryManager for peer" << peerUuid;
-            // 可以选择在这里通过 updateNetworkStatus 更新UI状态
         }
         else
         {
@@ -382,7 +391,7 @@ void MainWindow::handleRetryListenNowRequested()
 {
     if (networkManager) {
         updateNetworkStatus(tr("Attempting to start listening manually..."));
-        networkManager->startListening(); // 这个方法应该会发出成功或失败的状态消息
+        networkManager->startListening();
     } else {
         updateNetworkStatus(tr("NetworkManager is not available. Cannot start listening."));
     }
@@ -564,7 +573,6 @@ void MainWindow::onSendButtonClicked()
             coreContent = fragment.toHtml();
         }
 
-        // 获取当前时间并格式化
         QString currentTime = QDateTime::currentDateTime().toString("HH:mm");
         QString timestampHtml = QString(
                                     "<div style=\"text-align: center; margin-bottom: 5px;\">"
@@ -596,8 +604,8 @@ void MainWindow::onSendButtonClicked()
             chatHistories[currentOpenChatContactName].append(userMessageHtml);
         }
 
-        messageDisplay->addMessage(timestampHtml); // 先显示时间戳
-        messageDisplay->addMessage(userMessageHtml); // 再显示消息
+        messageDisplay->addMessage(timestampHtml); 
+        messageDisplay->addMessage(userMessageHtml); 
 
         networkManager->sendMessage(activeContactUuid, coreContent); 
 
@@ -612,8 +620,8 @@ void MainWindow::onSendButtonClicked()
             defaultFormat.setFontFamilies({QApplication::font().family()});
         }
         defaultFormat.setFontPointSize(fontSizeComboBox->currentText().toInt());
-        defaultFormat.setForeground(currentTextColor); // Use MainWindow's currentTextColor
-        defaultFormat.setBackground(currentBgColor);   // Use MainWindow's currentBgColor
+        defaultFormat.setForeground(currentTextColor); 
+        defaultFormat.setBackground(currentBgColor);   
         messageInputEdit->setCurrentCharFormat(defaultFormat);
 
         messageInputEdit->setFocus();
@@ -639,7 +647,7 @@ void MainWindow::updateNetworkStatus(const QString &status)
     else
     {
         if (statusBar())
-        { // Ensure statusBar is valid
+        { 
             statusBar()->showMessage(status, 5000);
         }
         else
@@ -654,20 +662,18 @@ void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const Q
     qDebug() << "MW::handleIncomingConnectionRequest: From" << peerAddress << ":" << peerPort << "PeerUUID:" << peerUuid << "NameHint:" << peerNameHint;
 
     if (!networkManager)
-    { // Guard against null networkManager
+    { 
         qWarning() << "MW::handleIncomingConnectionRequest: networkManager is null, cannot process request.";
         if (tempSocket)
-            tempSocket->abort(); // Abort the socket if we can't handle it
+            tempSocket->abort(); 
         return;
     }
 
-    // 检查是否是已知联系人
     for (int i = 0; i < contactListWidget->count(); ++i)
     {
         QListWidgetItem *item = contactListWidget->item(i);
         if (item->data(Qt::UserRole).toString() == peerUuid)
         {
-            // 已知联系人，自动接受并更新信息
             QString knownName = item->text();
             updateNetworkStatus(tr("Auto-reconnecting with known contact '%1' (UUID: %2) from %3:%4.")
                                     .arg(knownName)
@@ -675,7 +681,6 @@ void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const Q
                                     .arg(peerAddress)
                                     .arg(peerPort));
 
-            // 更新存储的IP和端口信息 (如果变化)
             bool infoChanged = false;
             if (item->data(Qt::UserRole + 1).toString() != peerAddress)
             {
@@ -689,15 +694,14 @@ void MainWindow::handleIncomingConnectionRequest(QTcpSocket *tempSocket, const Q
             }
             if (infoChanged)
             {
-                saveContacts(); // 保存更新后的信息
+                saveContacts(); 
             }
 
             networkManager->acceptIncomingSession(tempSocket, peerUuid, knownName);
-            return; // 处理完毕，不再询问用户
+            return; 
         }
     }
 
-    // 未知联系人，按原有逻辑询问用户
     QMessageBox::StandardButton reply;
     QString suggestedName = peerNameHint.isEmpty() ? peerAddress : peerNameHint;
 
@@ -749,7 +753,7 @@ void MainWindow::saveContacts()
         settings.setValue("port", item->data(Qt::UserRole + 2).toUInt());
     }
     settings.endArray();
-    settings.sync(); // 确保立即写入
+    settings.sync(); 
     updateNetworkStatus(tr("Contacts saved."));
 }
 
@@ -784,18 +788,16 @@ void MainWindow::loadContactsAndAttemptReconnection()
         if (!found)
         {
             QListWidgetItem *item = new QListWidgetItem(name, contactListWidget);
-            item->setData(Qt::UserRole, uuid);     // Store UUID
-            item->setData(Qt::UserRole + 1, ip);   // Store IP
-            item->setData(Qt::UserRole + 2, savedContactPort); // 保存端口
+            item->setData(Qt::UserRole, uuid);     
+            item->setData(Qt::UserRole + 1, ip);   
+            item->setData(Qt::UserRole + 2, savedContactPort); 
             item->setIcon(QIcon(":/icons/offline.svg"));
         }
 
-        // 尝试重连逻辑
         if (networkManager && !ip.isEmpty())
         {
             bool attemptMadeWithLocalListenPortAsTarget = false;
 
-            // 尝试1: 使用本地监听端口 localListenPort 作为目标端口
             if (localListenPort > 0)
             {
                 updateNetworkStatus(tr("Attempting reconnect to %1 (UUID: %2) at %3:%4 (using common port convention)...")
@@ -807,18 +809,13 @@ void MainWindow::loadContactsAndAttemptReconnection()
                 attemptMadeWithLocalListenPortAsTarget = true;
             }
 
-            // 尝试2: 使用联系人保存的端口 savedContactPort
-            // 条件：savedContactPort 有效，并且
-            //        (之前未使用 localListenPort 尝试 或 savedContactPort 与 localListenPort 不同)
             if (savedContactPort > 0)
             {
                 if (attemptMadeWithLocalListenPortAsTarget && savedContactPort == localListenPort)
                 {
-                    // 如果 localListenPort 和 savedContactPort 相同，并且已经尝试过，则不再尝试
                 }
                 else
                 {
-                    // 如果 localListenPort 未尝试过 (例如 localListenPort 为 0)，或者 savedContactPort 与 localListenPort 不同
                     updateNetworkStatus(tr("Attempting reconnect to %1 (UUID: %2) at %3:%4 (using last known port)...")
                                             .arg(name)
                                             .arg(uuid)
@@ -840,13 +837,11 @@ void MainWindow::loadContactsAndAttemptReconnection()
     }
 }
 
-// 实现 getLocalListenPort
 quint16 MainWindow::getLocalListenPort() const
 {
-    return localListenPort; // localListenPort 是 MainWindow 的成员变量
+    return localListenPort; 
 }
 
-// 实现 handleContactAdded
 void MainWindow::handleContactAdded(const QString &name, const QString &uuid, const QString &ip, quint16 port)
 {
     if (uuid.isEmpty() || name.isEmpty())
@@ -855,17 +850,14 @@ void MainWindow::handleContactAdded(const QString &name, const QString &uuid, co
         return;
     }
 
-    // 检查联系人是否已存在 (基于UUID)
     for (int i = 0; i < contactListWidget->count(); ++i)
     {
         QListWidgetItem *item = contactListWidget->item(i);
         if (item->data(Qt::UserRole).toString() == uuid)
         {
-            // 更新现有联系人信息
             item->setText(name);
-            item->setData(Qt::UserRole + 1, ip);   // Store IP
-            item->setData(Qt::UserRole + 2, port); // Store Port
-            // 可以根据网络状态更新图标，例如默认为离线
+            item->setData(Qt::UserRole + 1, ip);   
+            item->setData(Qt::UserRole + 2, port); 
             if (networkManager && networkManager->getPeerSocketState(uuid) == QAbstractSocket::ConnectedState)
             {
                 item->setIcon(QIcon(":/icons/online.svg"));
@@ -879,12 +871,10 @@ void MainWindow::handleContactAdded(const QString &name, const QString &uuid, co
         }
     }
 
-    // 添加新联系人
     QListWidgetItem *newItem = new QListWidgetItem(name, contactListWidget);
-    newItem->setData(Qt::UserRole, uuid);     // Store UUID
-    newItem->setData(Qt::UserRole + 1, ip);   // Store IP
-    newItem->setData(Qt::UserRole + 2, port); // Store Port
-    // 根据网络状态设置初始图标
+    newItem->setData(Qt::UserRole, uuid);     
+    newItem->setData(Qt::UserRole + 1, ip);   
+    newItem->setData(Qt::UserRole + 2, port); 
     if (networkManager && networkManager->getPeerSocketState(uuid) == QAbstractSocket::ConnectedState)
     {
         newItem->setIcon(QIcon(":/icons/online.svg"));
@@ -895,12 +885,8 @@ void MainWindow::handleContactAdded(const QString &name, const QString &uuid, co
     }
     contactListWidget->addItem(newItem);
     qInfo() << "Contact added:" << name << "UUID:" << uuid;
-
-    // 联系人添加后，可以选择保存联系人列表
-    // saveCurrentUserContacts(); // 取决于您希望何时保存
 }
 
-// 实现 onAddContactButtonClicked
 void MainWindow::onAddContactButtonClicked()
 {
     if (contactManager)
@@ -939,10 +925,8 @@ void MainWindow::onClearButtonClicked()
 
     if (reply == QMessageBox::Yes)
     {
-        // 清除UI显示
         if (messageDisplay && chatStackedWidget->currentWidget() == activeChatContentsWidget)
         {
-            // 确保当前聊天窗口是选中的联系人
             QListWidgetItem *currentSelection = contactListWidget->currentItem();
             if (currentSelection && currentSelection->data(Qt::UserRole).toString() == peerUuid)
             {
@@ -950,13 +934,11 @@ void MainWindow::onClearButtonClicked()
             }
         }
 
-        // 清除内存中的历史记录
         if (chatHistories.contains(peerUuid))
         {
             chatHistories[peerUuid].clear();
         }
 
-        // 通过ChatHistoryManager删除持久化存储
         if (chatHistoryManager)
         {
             chatHistoryManager->clearChatHistory(peerUuid);
@@ -964,4 +946,96 @@ void MainWindow::onClearButtonClicked()
         updateNetworkStatus(tr("Chat history with %1 cleared.").arg(peerName));
         qInfo() << "Chat history cleared for peer UUID:" << peerUuid;
     }
+}
+
+void MainWindow::onSendFileButtonClicked()
+{
+    QListWidgetItem *currentItem = contactListWidget->currentItem();
+    if (!currentItem) {
+        updateNetworkStatus(tr("Please select a contact to send a file to."));
+        return;
+    }
+    QString peerUuid = currentItem->data(Qt::UserRole).toString();
+    if (peerUuid.isEmpty()) {
+        updateNetworkStatus(tr("Selected contact has no UUID. Cannot send file."));
+        return;
+    }
+
+    if (!networkManager || networkManager->getPeerSocketState(peerUuid) != QAbstractSocket::ConnectedState) {
+        updateNetworkStatus(tr("Not connected to %1. Cannot send file.").arg(currentItem->text()));
+        QMessageBox::warning(this, tr("Network Error"), tr("Not connected to %1 to send a file.").arg(currentItem->text()));
+        return;
+    }
+
+    QString filePath = QFileDialog::getOpenFileName(this, tr("Select File to Send"));
+    if (filePath.isEmpty()) {
+        return; 
+    }
+
+    if (fileTransferManager) {
+        QString transferId = fileTransferManager->requestSendFile(peerUuid, filePath);
+        if (!transferId.isEmpty()) {
+            updateNetworkStatus(tr("Requesting to send file %1 to %2...")
+                                .arg(QFileInfo(filePath).fileName())
+                                .arg(currentItem->text()));
+        } else {
+            updateNetworkStatus(tr("Failed to initiate file transfer request for %1.")
+                                .arg(QFileInfo(filePath).fileName()));
+        }
+    } else {
+        qWarning() << "MainWindow::onSendFileButtonClicked: FileTransferManager is null!";
+        updateNetworkStatus(tr("File transfer service is not available."));
+    }
+}
+
+void MainWindow::handleIncomingFileOffer(const QString& transferID, const QString& peerUuid, const QString& fileName, qint64 fileSize)
+{
+    QString peerName = tr("Unknown Peer");
+    for (int i = 0; i < contactListWidget->count(); ++i) {
+        if (contactListWidget->item(i)->data(Qt::UserRole).toString() == peerUuid) {
+            peerName = contactListWidget->item(i)->text();
+            break;
+        }
+    }
+
+    QMessageBox::StandardButton reply;
+    reply = QMessageBox::question(this, tr("Incoming File Offer"),
+                                  tr("%1 (UUID: %2) wants to send you the file:\n%3 (%4 bytes).\nAccept?")
+                                      .arg(peerName)
+                                      .arg(peerUuid)
+                                      .arg(fileName)
+                                      .arg(fileSize),
+                                  QMessageBox::Yes | QMessageBox::No);
+
+    if (fileTransferManager) {
+        if (reply == QMessageBox::Yes) {
+            fileTransferManager->acceptFileOffer(transferID);
+            updateNetworkStatus(tr("Accepted file offer for %1 from %2.").arg(fileName).arg(peerName));
+        } else {
+            fileTransferManager->rejectFileOffer(transferID, "User declined");
+            updateNetworkStatus(tr("Rejected file offer for %1 from %2.").arg(fileName).arg(peerName));
+        }
+    }
+}
+
+void MainWindow::updateFileTransferProgress(const QString& transferID, qint64 bytesTransferred, qint64 totalSize)
+{
+    if (!m_currentUserIdStr.isEmpty()) { 
+         FileTransferSession sessionDetails; 
+         if (fileTransferManager) {
+         }
+        updateNetworkStatus(tr("File Transfer [%1]: %2 / %3 bytes")
+                            .arg(transferID.left(8)) 
+                            .arg(bytesTransferred)
+                            .arg(totalSize));
+    }
+}
+
+void MainWindow::handleFileTransferFinished(const QString& transferID, const QString& peerUuid, const QString& fileName, bool success, const QString& message)
+{
+    Q_UNUSED(peerUuid);
+    QString status = success ? tr("Successfully transferred") : tr("Failed to transfer");
+    status += QString(" file %1. TransferID: %2. %3").arg(fileName).arg(transferID.left(8)).arg(message);
+    updateNetworkStatus(status);
+    QMessageBox::information(this, tr("File Transfer Complete"), status);
 }

@@ -32,6 +32,7 @@ set(PROJECT_HEADERS
     includes/networkeventhandler.h
     includes/settingsdialog.h
     includes/databasemanager.h
+    includes/filetransfermanager.h
 )
 
 # Define source files
@@ -63,7 +64,10 @@ set(PROJECT_SOURCES
 
     # Database sources
     src/DatabaseModule/databasemanager.cpp
-    
+
+    # FileTransfer sources
+    src/FileTransferModule/filetransfermanager.cpp
+
     # Resources
     src/ResourceImport/resources.qrc
     
