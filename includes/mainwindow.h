@@ -10,6 +10,8 @@
 #include <QSettings>   // For storing UUID
 #include <QKeyEvent>   // 新增：包含 QKeyEvent
 #include <QTcpSocket>
+#include <QTextEdit>   // 添加 QTextEdit 头文件
+#include <QMap>        // 添加 QMap 头文件
 
 QT_BEGIN_NAMESPACE
 class QListWidget;
@@ -48,7 +50,6 @@ public:
     QString getLocalUserUuid() const;
     quint16 getLocalListenPort() const;
     void updateNetworkStatus(const QString &status);
-    // loadOrCreateUserIdentity 重命名并修改参数
     void loadCurrentUserIdentity();
     void saveChatHistory(const QString &peerUuid);
 

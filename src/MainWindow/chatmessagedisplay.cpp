@@ -4,9 +4,10 @@
 #include <QLabel>
 #include <QStyle>
 #include <QTimer>
+#include <QRegularExpression> // 新增
 
 ChatMessageDisplay::ChatMessageDisplay(QWidget *parent)
-    : QScrollArea(parent)
+    : QScrollArea(parent), m_lastDisplayedTimestampValue("") // 初始化
 {
     // 设置滚动区域的属性
     setWidgetResizable(true);
@@ -92,6 +93,16 @@ ChatMessageDisplay::ChatMessageDisplay(QWidget *parent)
     QTimer::singleShot(0, this, &ChatMessageDisplay::updateContentMargins);
 }
 
+// 新增：实现提取时间戳的辅助方法
+QString ChatMessageDisplay::extractTimestampValueFromHtml(const QString& timestampHtml) const {
+    QRegularExpression re("<div style=\"text-align: center; margin-bottom: 5px;\"><span style=\"background-color: #aaaaaa; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">(\\d{2}:\\d{2})</span></div>");
+    QRegularExpressionMatch match = re.match(timestampHtml);
+    if (match.hasMatch()) {
+        return match.captured(1);
+    }
+    return QString();
+}
+
 void ChatMessageDisplay::updateContentMargins()
 {
     if (!contentLayout || !verticalScrollBar()) return;
@@ -113,25 +124,39 @@ void ChatMessageDisplay::updateContentMargins()
 
 void ChatMessageDisplay::addMessage(const QString &html)
 {
-    // 创建新的消息标签
-    QLabel *messageLabel = new QLabel(html, contentWidget); // 父对象是 contentWidget
-    messageLabel->setTextFormat(Qt::RichText);
-    messageLabel->setWordWrap(true);
-    messageLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
-    messageLabel->setOpenExternalLinks(false);
-    
-    // 确保标签能够正确显示富文本
-    messageLabel->setMargin(2);
-    messageLabel->setMinimumWidth(100);
-    
-    // 添加到布局中 (在spacer之后，视觉上在底部)
-    contentLayout->addWidget(messageLabel);
+    QString extractedTime = extractTimestampValueFromHtml(html);
+
+    if (!extractedTime.isEmpty()) { // 这是一个时间戳条目
+        if (extractedTime != m_lastDisplayedTimestampValue) {
+            // 时间戳不同，或者之前没有时间戳，显示它
+            QLabel *messageLabel = new QLabel(html, contentWidget);
+            messageLabel->setTextFormat(Qt::RichText);
+            messageLabel->setWordWrap(true);
+            messageLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+            messageLabel->setOpenExternalLinks(false);
+            messageLabel->setMargin(2);
+            messageLabel->setMinimumWidth(100);
+            contentLayout->addWidget(messageLabel);
+            m_lastDisplayedTimestampValue = extractedTime; // 更新最后显示的时间戳
+        } else {
+            // 时间戳与上一个相同，不显示
+            return;
+        }
+    } else { // 这是一个普通消息条目
+        QLabel *messageLabel = new QLabel(html, contentWidget);
+        messageLabel->setTextFormat(Qt::RichText);
+        messageLabel->setWordWrap(true);
+        messageLabel->setTextInteractionFlags(Qt::TextBrowserInteraction);
+        messageLabel->setOpenExternalLinks(false);
+        messageLabel->setMargin(2);
+        messageLabel->setMinimumWidth(100);
+        contentLayout->addWidget(messageLabel);
+    }
     
     // 延迟调用以更新边距并滚动到底部
-    QTimer::singleShot(0, this, [this]() { // 第一个定时器
-        this->updateContentMargins(); // 首先更新边距，这可能会影响布局和总高度
-        
-        QTimer::singleShot(0, this, [this]() { // 第二个定时器，进一步延迟滚动
+    QTimer::singleShot(0, this, [this]() {
+        this->updateContentMargins();
+        QTimer::singleShot(0, this, [this]() {
             this->scrollToBottom();       
         });
     });
@@ -139,6 +164,7 @@ void ChatMessageDisplay::addMessage(const QString &html)
 
 void ChatMessageDisplay::clear()
 {
+    m_lastDisplayedTimestampValue.clear(); // 重置最后显示的时间戳
     // 保留spacer，删除所有其他组件
     QLayoutItem *item;
     while ((item = contentLayout->takeAt(1)) != nullptr) {
@@ -152,16 +178,17 @@ void ChatMessageDisplay::clear()
 
 void ChatMessageDisplay::setMessages(const QStringList &messages)
 {
-    // 先清除现有消息
+    // 先清除现有消息 (clear() 会重置 m_lastDisplayedTimestampValue)
     clear();
     
-    // 添加所有消息
+    // 添加所有消息 (addMessage 内部会处理时间戳过滤)
     for (const QString &message : messages) {
-        addMessage(message);
+        addMessage(message); // addMessage 现在包含过滤逻辑
     }
     if (messages.isEmpty()) {
         QTimer::singleShot(0, this, &ChatMessageDisplay::updateContentMargins);
     }
+    // scrollToBottom 会在最后一个 addMessage 调用中被触发
 }
 
 void ChatMessageDisplay::scrollToBottom()

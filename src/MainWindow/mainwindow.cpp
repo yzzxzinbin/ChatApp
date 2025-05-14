@@ -32,6 +32,7 @@
 #include <QSettings>
 #include <QDebug>
 #include <QEvent>
+#include <QDateTime>
 
 MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     : QMainWindow(parent),
@@ -52,13 +53,10 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     loadCurrentUserIdentity();
 
-    // 修正 ChatHistoryManager 构造函数调用
-    // 将用户ID作为路径的一部分传递给appName，以便ChatHistoryManager可以创建用户特定的历史记录文件夹
     chatHistoryManager = new ChatHistoryManager(QCoreApplication::applicationName() + "/" + m_currentUserIdStr, this);
 
     networkManager = new NetworkManager(this);
     networkManager->setLocalUserDetails(localUserUuid, localUserName);
-    // 设置监听偏好，但还不立即启动监听
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
 
@@ -95,7 +93,6 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
 
     loadCurrentUserContacts();
 
-    // 关键改动：首先根据设置启动TCP监听
     if (autoNetworkListeningEnabled)
     {
         networkManager->startListening(); // TCP服务器在此处尝试启动
@@ -381,7 +378,6 @@ void MainWindow::saveChatHistory(const QString &peerUuid)
     }
 }
 
-// 新增槽函数实现
 void MainWindow::handleRetryListenNowRequested()
 {
     if (networkManager) {
@@ -392,19 +388,16 @@ void MainWindow::handleRetryListenNowRequested()
     }
 }
 
-// 新增槽函数实现
 void MainWindow::handleManualUdpBroadcastRequested()
 {
     if (networkManager) {
-        updateNetworkStatus(tr("Attempting to send manual UDP discovery broadcast...")); // 添加此行
-        // NetworkManager::triggerManualUdpBroadcast 内部会发出更详细的状态消息
+        updateNetworkStatus(tr("Attempting to send manual UDP discovery broadcast..."));
         networkManager->triggerManualUdpBroadcast();
     } else {
         updateNetworkStatus(tr("NetworkManager is not available. Cannot send UDP broadcast."));
     }
 }
 
-// 新增槽函数实现
 void MainWindow::onMessageInputTextChanged()
 {
     if (clearMessageButton && messageInputEdit) {
@@ -412,15 +405,14 @@ void MainWindow::onMessageInputTextChanged()
     }
 }
 
-// 新增槽函数实现
 void MainWindow::onClearMessageInputClicked()
 {
     if (messageInputEdit) {
         messageInputEdit->clear();
-        messageInputEdit->setFocus(); // Optional: return focus to the input edit
+        messageInputEdit->setFocus();
     }
 }
- 
+
 void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *previous)
 {
     Q_UNUSED(previous);
@@ -468,19 +460,19 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
             }
         }
 
-        QStringList messagesToDisplay;
+        QStringList fullHistory;
         if (chatHistories.contains(peerUuid))
         {
-            messagesToDisplay = chatHistories.value(peerUuid);
-            qDebug() << "onContactSelected: Using in-memory history for" << peerUuid << "Count:" << messagesToDisplay.count();
+            fullHistory = chatHistories.value(peerUuid);
+            qDebug() << "onContactSelected: Using in-memory history for" << peerUuid << "Count:" << fullHistory.count();
         }
         else
         {
             if (chatHistoryManager)
             {
-                messagesToDisplay = chatHistoryManager->loadChatHistory(peerUuid);
-                chatHistories[peerUuid] = messagesToDisplay;
-                qDebug() << "onContactSelected: Loaded history using ChatHistoryManager for" << peerUuid << "Count:" << messagesToDisplay.count();
+                fullHistory = chatHistoryManager->loadChatHistory(peerUuid);
+                chatHistories[peerUuid] = fullHistory;
+                qDebug() << "onContactSelected: Loaded history using ChatHistoryManager for" << peerUuid << "Count:" << fullHistory.count();
             }
             else
             {
@@ -489,7 +481,8 @@ void MainWindow::onContactSelected(QListWidgetItem *current, QListWidgetItem *pr
             }
         }
 
-        messageDisplay->setMessages(messagesToDisplay);
+        messageDisplay->setMessages(fullHistory);
+
         current->setBackground(QBrush());
 
         messageInputEdit->clear();
@@ -571,6 +564,14 @@ void MainWindow::onSendButtonClicked()
             coreContent = fragment.toHtml();
         }
 
+        // 获取当前时间并格式化
+        QString currentTime = QDateTime::currentDateTime().toString("HH:mm");
+        QString timestampHtml = QString(
+                                    "<div style=\"text-align: center; margin-bottom: 5px;\">"
+                                    "<span style=\"background-color: #aaaaaa; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">%1</span>"
+                                    "</div>")
+                                    .arg(currentTime);
+
         QString userMessageHtml = QString(
                                       "<div style=\"text-align: right; margin-bottom: 2px;\">"
                                       "<p style=\"margin:0; padding:0; text-align: right;\">"
@@ -580,24 +581,25 @@ void MainWindow::onSendButtonClicked()
                                       .arg(localUserName.toHtmlEscaped())
                                       .arg(coreContent);
 
-        QString activeContactUuid = targetPeerUuid; // 使用从currentItem获取的UUID
+        QString activeContactUuid = targetPeerUuid; 
 
         if (!activeContactUuid.isEmpty())
         {
-            chatHistories[activeContactUuid].append(userMessageHtml); // Use UUID for history key
-            saveChatHistory(activeContactUuid);                       // 调用 MainWindow::saveChatHistory
+            chatHistories[activeContactUuid].append(timestampHtml);
+            chatHistories[activeContactUuid].append(userMessageHtml); 
+            saveChatHistory(activeContactUuid);                       
         }
         else
         {
             qWarning() << "Sending message: Active contact" << currentOpenChatContactName << "has no UUID. Using name as fallback for history.";
+            chatHistories[currentOpenChatContactName].append(timestampHtml);
             chatHistories[currentOpenChatContactName].append(userMessageHtml);
-            // 注意：如果使用name作为fallback，保存时也应该用name，但这通常不推荐
-            // chatHistoryManager->saveChatHistory(currentOpenChatContactName, chatHistories.value(currentOpenChatContactName));
         }
 
-        messageDisplay->addMessage(userMessageHtml);
+        messageDisplay->addMessage(timestampHtml); // 先显示时间戳
+        messageDisplay->addMessage(userMessageHtml); // 再显示消息
 
-        networkManager->sendMessage(activeContactUuid, coreContent); // 使用 targetPeerUuid 发送
+        networkManager->sendMessage(activeContactUuid, coreContent); 
 
         messageInputEdit->clear();
         QTextCharFormat defaultFormat;
@@ -761,7 +763,7 @@ void MainWindow::loadContactsAndAttemptReconnection()
         QString uuid = settings.value("uuid").toString();
         QString name = settings.value("name").toString();
         QString ip = settings.value("ip").toString();
-        quint16 savedContactPort = settings.value("port").toUInt(); // 这是联系人保存的端口
+        quint16 savedContactPort = settings.value("port").toUInt();
 
         if (uuid.isEmpty() || name.isEmpty())
             continue;
@@ -771,9 +773,9 @@ void MainWindow::loadContactsAndAttemptReconnection()
         {
             if (contactListWidget->item(j)->data(Qt::UserRole).toString() == uuid)
             {
-                contactListWidget->item(j)->setText(name); // 更新名称
+                contactListWidget->item(j)->setText(name);
                 contactListWidget->item(j)->setData(Qt::UserRole + 1, ip);
-                contactListWidget->item(j)->setData(Qt::UserRole + 2, savedContactPort); // 更新端口
+                contactListWidget->item(j)->setData(Qt::UserRole + 2, savedContactPort);
                 contactListWidget->item(j)->setIcon(QIcon(":/icons/offline.svg"));
                 found = true;
                 break;
@@ -912,7 +914,6 @@ void MainWindow::onAddContactButtonClicked()
     }
 }
 
-// 实现 onClearButtonClicked
 void MainWindow::onClearButtonClicked()
 {
     QListWidgetItem *currentItem = contactListWidget->currentItem();

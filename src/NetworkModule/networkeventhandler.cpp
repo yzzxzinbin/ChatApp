@@ -12,6 +12,7 @@
 #include <QMap>
 #include <QStringList>
 #include <QDebug> // For qWarning
+#include <QDateTime> // For timestamp
 
 NetworkEventHandler::NetworkEventHandler(
     NetworkManager *nm,
@@ -187,6 +188,15 @@ void NetworkEventHandler::handleNewMessageReceived(const QString &peerUuid, cons
         return;
     }
 
+    // 获取当前时间并格式化
+    QString currentTime = QDateTime::currentDateTime().toString("HH:mm");
+    QString timestampHtml = QString(
+                                "<div style=\"text-align: center; margin-bottom: 5px;\">"
+                                "<span style=\"background-color: #aaaaaa; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">%1</span>"
+                                "</div>")
+                                .arg(currentTime);
+
+    // 准备消息内容 HTML
     QString receivedMessageHtml = QString(
                                       "<div style=\"text-align: left; margin-bottom: 2px;\">"
                                       "<p style=\"margin:0; padding:0; text-align: left;\">"
@@ -196,14 +206,19 @@ void NetworkEventHandler::handleNewMessageReceived(const QString &peerUuid, cons
                                       .arg(contactName.toHtmlEscaped())
                                       .arg(message);
 
+    // 添加时间戳和消息到历史记录 (总是保存)
+    (*chatHistories)[peerUuid].append(timestampHtml);
     (*chatHistories)[peerUuid].append(receivedMessageHtml);
-    mainWindowPtr->saveChatHistory(peerUuid); // 新增：保存聊天记录
+    mainWindowPtr->saveChatHistory(peerUuid);
 
-    if (contactListWidget->currentItem() == contactItem) {
+    if (contactListWidget->currentItem() == contactItem) { // 如果是当前聊天窗口
+        // 直接将时间戳和消息都交给 messageDisplay
+        messageDisplay->addMessage(timestampHtml);
         messageDisplay->addMessage(receivedMessageHtml);
     } else {
         contactItem->setBackground(Qt::lightGray);
         mainWindowPtr->updateNetworkStatus(tr("New message from %1.").arg(contactName));
+        // 对于非活动聊天，当它被选中时，onContactSelected 会处理历史记录中的时间戳显示
     }
 }
 

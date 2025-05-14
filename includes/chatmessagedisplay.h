@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QLabel>
 #include <QList>
+#include <QString> // 新增
 
 class ChatMessageDisplay : public QScrollArea
 {
@@ -34,6 +35,9 @@ private:
     
     int m_originalRightMargin;   // 新增：存储原始右边距
     int m_scrollBarWidth;        // 新增：存储滚动条宽度
+    QString m_lastDisplayedTimestampValue; // 新增：存储最后显示的时间戳值
+
+    QString extractTimestampValueFromHtml(const QString& timestampHtml) const; // 新增：辅助方法
     
     // 重写调整大小事件，确保滚动条位置正确
     void resizeEvent(QResizeEvent *event) override;
