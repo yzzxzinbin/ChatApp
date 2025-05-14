@@ -26,9 +26,15 @@ const int UDP_TEMP_RESPONSE_LISTENER_TIMEOUT_MS = 15000; // New: Timeout for tem
 
 // File Transfer Message Formats
 const QString FT_MSG_OFFER_FORMAT = QStringLiteral("<FT_OFFER TransferID=\"%1\" FileName=\"%2\" FileSize=\"%3\" SenderUUID=\"%4\"/>");
-const QString FT_MSG_ACCEPT_FORMAT = QStringLiteral("<FT_ACCEPT TransferID=\"%1\" ReceiverUUID=\"%2\"/>");
+const QString FT_MSG_ACCEPT_FORMAT = QStringLiteral("<FT_ACCEPT TransferID=\"%1\" ReceiverUUID=\"%2\" SavePathHint=\"%3\"/>"); // Added SavePathHint (optional)
 const QString FT_MSG_REJECT_FORMAT = QStringLiteral("<FT_REJECT TransferID=\"%1\" Reason=\"%2\" ReceiverUUID=\"%3\"/>");
-// Later: FT_MSG_CHUNK_FORMAT, FT_MSG_EOF_FORMAT, FT_MSG_ACK_FORMAT, FT_MSG_ERROR_FORMAT
+const QString FT_MSG_CHUNK_FORMAT = QStringLiteral("<FT_CHUNK TransferID=\"%1\" ChunkID=\"%2\" Size=\"%3\" Data=\"%4\"/>"); // Data will be Base64 encoded
+const QString FT_MSG_DATA_ACK_FORMAT = QStringLiteral("<FT_ACK_DATA TransferID=\"%1\" ChunkID=\"%2\" ReceiverUUID=\"%3\"/>");
+const QString FT_MSG_EOF_FORMAT = QStringLiteral("<FT_EOF TransferID=\"%1\" TotalChunks=\"%2\" FinalChecksum=\"%3\"/>"); // Optional: FinalChecksum
+const QString FT_MSG_EOF_ACK_FORMAT = QStringLiteral("<FT_ACK_EOF TransferID=\"%1\" ReceiverUUID=\"%2\"/>");
+const QString FT_MSG_ERROR_FORMAT = QStringLiteral("<FT_ERROR TransferID=\"%1\" Code=\"%2\" Message=\"%3\" OriginatorUUID=\"%4\"/>");
+
+const qint64 DEFAULT_CHUNK_SIZE = 64 * 1024; // 64KB chunks
 
 class NetworkManager : public QObject
 {

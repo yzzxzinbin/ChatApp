@@ -35,6 +35,7 @@
 #include <QEvent>
 #include <QDateTime>
 #include <QFileDialog> // <-- Add this for file dialog
+#include <QStandardPaths> // <-- Add this for standard paths
 
 MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     : QMainWindow(parent),
@@ -1009,8 +1010,18 @@ void MainWindow::handleIncomingFileOffer(const QString& transferID, const QStrin
 
     if (fileTransferManager) {
         if (reply == QMessageBox::Yes) {
-            fileTransferManager->acceptFileOffer(transferID);
-            updateNetworkStatus(tr("Accepted file offer for %1 from %2.").arg(fileName).arg(peerName));
+            // Ask user where to save the file
+            QString savePath = QFileDialog::getSaveFileName(this, tr("Save File As..."),
+                                                            QStandardPaths::writableLocation(QStandardPaths::DownloadLocation) + "/" + fileName,
+                                                            tr("All Files (*)"));
+            if (savePath.isEmpty()) {
+                fileTransferManager->rejectFileOffer(transferID, "User cancelled save dialog");
+                updateNetworkStatus(tr("File offer for %1 from %2 cancelled by user.").arg(fileName).arg(peerName));
+                return;
+            }
+            fileTransferManager->acceptFileOffer(transferID, savePath); // Pass savePath
+            updateNetworkStatus(tr("Accepted file offer for %1 from %2. Saving to %3.")
+                                .arg(fileName).arg(peerName).arg(QFileInfo(savePath).fileName()));
         } else {
             fileTransferManager->rejectFileOffer(transferID, "User declined");
             updateNetworkStatus(tr("Rejected file offer for %1 from %2.").arg(fileName).arg(peerName));
