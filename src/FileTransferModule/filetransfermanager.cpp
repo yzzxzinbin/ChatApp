@@ -82,12 +82,12 @@ void FileTransferManager::sendFileOffer(const QString& peerUuid, const QString& 
 {
     QString offerMessage = FT_MSG_OFFER_FORMAT.arg(transferID).arg(fileName).arg(fileSize).arg(m_localUserUuid);
     m_networkManager->sendMessage(peerUuid, offerMessage);
-    qDebug() << "FileTransferManager: Sent file offer:" << offerMessage << "to" << peerUuid;
+    qDebug() << "FileTransferManager: Sent file offer to" << peerUuid << "TransferID:" << transferID << "FileName:" << fileName << "Size:" << fileSize;
 }
 
 void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, const QString& message)
 {
-    qDebug() << "FileTransferManager::handleIncomingFileMessage from" << peerUuid << ":" << message;
+    qDebug() << "FileTransferManager::handleIncomingFileMessage from" << peerUuid << "Type:" << (message.left(20));
 
     if (message.startsWith("<FT_OFFER")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
@@ -234,14 +234,14 @@ void FileTransferManager::sendAcceptMessage(const QString& peerUuid, const QStri
 {
     QString acceptMessage = FT_MSG_ACCEPT_FORMAT.arg(transferID).arg(m_localUserUuid).arg(savePathHint);
     m_networkManager->sendMessage(peerUuid, acceptMessage);
-    qDebug() << "FileTransferManager: Sent file accept:" << acceptMessage << "to" << peerUuid;
+    qDebug() << "FileTransferManager: Sent file accept to" << peerUuid << "TransferID:" << transferID;
 }
 
 void FileTransferManager::sendRejectMessage(const QString& peerUuid, const QString& transferID, const QString& reason)
 {
     QString rejectMessage = FT_MSG_REJECT_FORMAT.arg(transferID).arg(reason).arg(m_localUserUuid);
     m_networkManager->sendMessage(peerUuid, rejectMessage);
-    qDebug() << "FileTransferManager: Sent file reject:" << rejectMessage << "to" << peerUuid;
+    qDebug() << "FileTransferManager: Sent file reject to" << peerUuid << "TransferID:" << transferID << "Reason:" << reason;
 }
 
 void FileTransferManager::handleFileAccept(const QString& peerUuid, const QString& transferID, const QString& savePathHint)
