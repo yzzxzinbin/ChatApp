@@ -1128,5 +1128,6 @@ void MainWindow::handleFileTransferFinished(const QString &transferID, const QSt
     QString status = success ? tr("Successfully transferred") : tr("Failed to transfer");
     status += QString(" file %1. TransferID: %2. %3").arg(fileName).arg(transferID.left(8)).arg(message);
     updateNetworkStatus(status);
+    // 如果message中包含速度信息，弹窗也显示
     QMessageBox::information(this, tr("File Transfer Complete"), status);
 }

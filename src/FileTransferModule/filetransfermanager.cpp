@@ -7,6 +7,7 @@
 #include <QRegularExpression>
 #include <QStandardPaths>
 #include <QBuffer>
+#include <QElapsedTimer>
 
 // Helper function to extract attribute (can be moved to a shared utility if NetworkManager's one is not accessible/suitable)
 QString FileTransferManager::extractMessageAttribute(const QString& message, const QString& attributeName) const {
@@ -17,6 +18,10 @@ QString FileTransferManager::extractMessageAttribute(const QString& message, con
     }
     return QString();
 }
+
+// 集中ACK参数
+const int ACK_BATCH_SIZE = 4;      // 每收到4个新chunk就ACK一次
+const int ACK_DELAY_MS = 100;      // 或每100ms至少ACK一次
 
 FileTransferManager::FileTransferManager(NetworkManager* networkManager, FileIOManager* fileIOManager, const QString& localUserUuid, QObject *parent)
     : QObject(parent), m_networkManager(networkManager), m_fileIOManager(fileIOManager), m_localUserUuid(localUserUuid)
@@ -39,6 +44,20 @@ FileTransferManager::~FileTransferManager()
     m_sessions.clear();
     m_outstandingReadRequests.clear();
     m_outstandingWriteRequests.clear();
+
+    // 清理ACK定时器
+    for (auto timer : m_ackDelayTimers) {
+        timer->stop();
+        timer->deleteLater();
+    }
+    m_ackDelayTimers.clear();
+    m_pendingAckCount.clear();
+
+    // 清理传输计时器
+    for (auto timer : m_transferTimers) {
+        delete timer;
+    }
+    m_transferTimers.clear();
 }
 
 QString FileTransferManager::generateTransferID() const
@@ -305,6 +324,14 @@ void FileTransferManager::startActualFileSend(const QString& transferID) {
     session.bytesTransferred = 0;
     m_outstandingReadRequests[transferID] = 0;
 
+    // 启动传输计时器
+    if (!m_transferTimers.contains(transferID)) {
+        QElapsedTimer* timer = new QElapsedTimer();
+        timer->start();
+        m_transferTimers[transferID] = timer;
+        qInfo() << "[FTM] Transfer" << transferID << "timer started.";
+    }
+
     qInfo() << "FileTransferManager: Starting to send file" << session.fileName << "for TransferID" << transferID;
     emit fileTransferStarted(transferID, session.peerUuid, session.fileName, true);
     processSendQueue(transferID);
@@ -319,6 +346,16 @@ void FileTransferManager::prepareToReceiveFile(const QString& transferID, const 
     session.receivedOutOfOrderChunks.clear();
     session.bytesTransferred = 0;
     m_outstandingWriteRequests[transferID] = 0;
+
+    m_pendingAckCount[transferID] = 0; // 初始化ACK计数器
+
+    // 启动传输计时器
+    if (!m_transferTimers.contains(transferID)) {
+        QElapsedTimer* timer = new QElapsedTimer();
+        timer->start();
+        m_transferTimers[transferID] = timer;
+        qInfo() << "[FTM] Transfer" << transferID << "timer started (receiver).";
+    }
 
     qInfo() << "FileTransferManager: Preparing to receive file" << session.fileName << "for TransferID" << transferID << "to" << session.localFilePath;
     emit fileTransferStarted(transferID, session.peerUuid, session.fileName, false);
@@ -345,6 +382,11 @@ void FileTransferManager::processSendQueue(const QString& transferID) {
         m_outstandingReadRequests[transferID]++;
         session.nextChunkToSendInWindow++;
     }
+
+    qInfo() << "[FTM] processSendQueue: transferID=" << transferID
+            << "sendWindowBase=" << session.sendWindowBase
+            << "nextChunkToSendInWindow=" << session.nextChunkToSendInWindow
+            << "outstandingReads=" << m_outstandingReadRequests.value(transferID, 0);
 }
 
 void FileTransferManager::handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QByteArray& data, bool success, const QString& error) {
@@ -410,6 +452,11 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
     }
     if (session.state == FileTransferSession::Accepted) session.state = FileTransferSession::Transferring;
 
+    qInfo() << "[FTM] handleFileChunk: transferID=" << transferID << "chunkID=" << chunkID << "size=" << chunkSize
+            << "in-order=" << (chunkID == session.highestContiguousChunkReceived + 1)
+            << "outstandingWrites=" << m_outstandingWriteRequests.value(transferID, 0)
+            << "bufferedChunks=" << session.receivedOutOfOrderChunks.size();
+
     if (chunkID < session.highestContiguousChunkReceived + 1 || 
         chunkID >= session.highestContiguousChunkReceived + 1 + DEFAULT_RECEIVE_WINDOW_SIZE) {
         qWarning() << "FileTransferManager::handleFileChunk: Chunk" << chunkID << "out of window for" << transferID
@@ -432,6 +479,31 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
             m_fileIOManager->requestWriteFileChunk(transferID, chunkID, session.localFilePath, expectedOffset, data);
             m_outstandingWriteRequests[transferID]++;
         }
+
+        // 集中ACK计数
+        m_pendingAckCount[transferID] += 1;
+        // 启动/重启ACK延迟定时器
+        if (!m_ackDelayTimers.contains(transferID)) {
+            QTimer* timer = new QTimer(this);
+            timer->setSingleShot(true);
+            connect(timer, &QTimer::timeout, this, [this, peerUuid, transferID]() {
+                sendDataAck(peerUuid, transferID, m_sessions[transferID].highestContiguousChunkReceived);
+                m_pendingAckCount[transferID] = 0;
+                if (m_ackDelayTimers.contains(transferID)) {
+                    m_ackDelayTimers[transferID]->stop();
+                }
+            });
+            m_ackDelayTimers[transferID] = timer;
+        }
+        if (!m_ackDelayTimers[transferID]->isActive()) {
+            m_ackDelayTimers[transferID]->start(ACK_DELAY_MS);
+        }
+        // 如果累计到批量阈值，立即ACK
+        if (m_pendingAckCount[transferID] >= ACK_BATCH_SIZE) {
+            sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived);
+            m_pendingAckCount[transferID] = 0;
+            m_ackDelayTimers[transferID]->stop();
+        }
     } else {
         if (!session.receivedOutOfOrderChunks.contains(chunkID)) {
             session.receivedOutOfOrderChunks.insert(chunkID, data);
@@ -451,6 +523,9 @@ void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 c
     m_outstandingWriteRequests[transferID]--;
     FileTransferSession& session = m_sessions[transferID];
 
+    qInfo() << "[FTM] handleChunkWritten: transferID=" << transferID << "chunkID=" << chunkID << "bytesWritten=" << bytesWritten
+            << "success=" << success << "outstandingWrites=" << m_outstandingWriteRequests.value(transferID, 0);
+
     if (!success) {
         qWarning() << "FileTransferManager: Failed to write chunk" << chunkID << "for" << transferID << ":" << error;
         sendError(session.peerUuid, transferID, "FILE_WRITE_ERROR_ASYNC", error);
@@ -465,12 +540,20 @@ void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 c
         qDebug() << "FileTransferManager: Successfully wrote chunk" << chunkID << "for" << transferID << ". Total written:" << session.bytesTransferred;
 
         processBufferedChunks(transferID);
-        sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
 
         if (session.highestContiguousChunkReceived == session.totalChunks - 1) {
             qInfo() << "FileTransferManager: All chunks appear to be written for receiver " << transferID;
+            // 传输完成，立即ACK最后一次
+            if (m_pendingAckCount[transferID] > 0) {
+                sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+                m_pendingAckCount[transferID] = 0;
+            }
+            if (m_ackDelayTimers.contains(transferID)) {
+                m_ackDelayTimers[transferID]->stop();
+                m_ackDelayTimers[transferID]->deleteLater();
+                m_ackDelayTimers.remove(transferID);
+            }
         }
-
     } else {
         qWarning() << "FileTransferManager: Wrote chunk" << chunkID << "but expected" << (session.highestContiguousChunkReceived + 1);
         sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
@@ -492,12 +575,19 @@ void FileTransferManager::processBufferedChunks(const QString& transferID) {
         m_fileIOManager->requestWriteFileChunk(transferID, nextExpectedChunk, session.localFilePath, expectedOffset, data);
         m_outstandingWriteRequests[transferID]++;
     }
+
+    qInfo() << "[FTM] processBufferedChunks: transferID=" << transferID
+            << "nextExpectedChunk=" << nextExpectedChunk
+            << "buffered=" << session.receivedOutOfOrderChunks.size()
+            << "outstandingWrites=" << m_outstandingWriteRequests.value(transferID, 0);
 }
 
 void FileTransferManager::sendDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID) {
     QString ackMsg = FT_MSG_DATA_ACK_FORMAT.arg(transferID).arg(ackedChunkID).arg(m_localUserUuid);
     m_networkManager->sendMessage(peerUuid, ackMsg);
     qDebug() << "FileTransferManager: Sent ACK for highest contiguous chunk" << ackedChunkID << "for" << transferID;
+
+    qInfo() << "[FTM] sendDataAck: transferID=" << transferID << "ackedChunkID=" << ackedChunkID;
 }
 
 void FileTransferManager::handleDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID) {
@@ -516,6 +606,9 @@ void FileTransferManager::handleDataAck(const QString& peerUuid, const QString& 
 
         qint64 oldSendWindowBase = session.sendWindowBase;
         session.sendWindowBase = ackedChunkID + 1;
+
+        qInfo() << "[FTM] handleDataAck: transferID=" << transferID << "ackedChunkID=" << ackedChunkID
+                << "oldSendWindowBase=" << oldSendWindowBase << "newSendWindowBase=" << session.sendWindowBase;
 
         if (session.sendWindowBase > oldSendWindowBase) {
             session.bytesTransferred = qMin(session.fileSize, session.sendWindowBase * DEFAULT_CHUNK_SIZE);
@@ -639,9 +732,36 @@ void FileTransferManager::cleanupSession(const QString& transferID, bool success
 
     m_outstandingReadRequests.remove(transferID);
     m_outstandingWriteRequests.remove(transferID);
-    
+
+    if (m_ackDelayTimers.contains(transferID)) {
+        m_ackDelayTimers[transferID]->stop();
+        m_ackDelayTimers[transferID]->deleteLater();
+        m_ackDelayTimers.remove(transferID);
+    }
+    m_pendingAckCount.remove(transferID);
+
+    // 统计传输耗时和速度
+    double speedMBps = 0.0;
+    qint64 elapsedMs = 0;
+    if (m_transferTimers.contains(transferID)) {
+        elapsedMs = m_transferTimers[transferID]->elapsed();
+        delete m_transferTimers[transferID];
+        m_transferTimers.remove(transferID);
+    }
+    qint64 totalBytes = session.fileSize;
+    if (success && elapsedMs > 0 && totalBytes > 0) {
+        speedMBps = (double)totalBytes / 1024.0 / 1024.0 / ((double)elapsedMs / 1000.0);
+        qInfo() << "[FTM] Transfer" << transferID << "finished in" << elapsedMs << "ms,"
+                << "average speed:" << QString::number(speedMBps, 'f', 2) << "MB/s";
+    }
+
+    // 在信号中带上速度信息
+    QString msgWithSpeed = message;
+    if (success && speedMBps > 0.0) {
+        msgWithSpeed += tr(" (Avg speed: %1 MB/s, Time: %2 ms)").arg(QString::number(speedMBps, 'f', 2)).arg(elapsedMs);
+    }
     if (success) {
-        emit fileTransferFinished(transferID, session.peerUuid, session.fileName, true, message);
+        emit fileTransferFinished(transferID, session.peerUuid, session.fileName, true, msgWithSpeed);
     } else {
         emit fileTransferError(transferID, session.peerUuid, message);
         emit fileTransferFinished(transferID, session.peerUuid, session.fileName, false, message);

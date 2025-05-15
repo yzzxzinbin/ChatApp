@@ -12,6 +12,13 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 find_package(QT NAMES Qt6 Qt5 REQUIRED COMPONENTS Widgets Core)
 find_package(Qt${QT_VERSION_MAJOR} REQUIRED COMPONENTS Widgets Core Network Sql)
 
+if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    # 定义空宏替换qDebug
+    add_definitions(-DqDebug=QT_NO_QDEBUG_MACRO)
+    # 或者更彻底地禁用
+    add_definitions(-DQT_NO_DEBUG_OUTPUT -DQT_NO_WARNING_OUTPUT)
+endif()
+
 # Set include directories
 set(PROJECT_INCLUDE_DIRS
     ${CMAKE_CURRENT_SOURCE_DIR}/includes
