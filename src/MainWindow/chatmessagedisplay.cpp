@@ -95,7 +95,7 @@ ChatMessageDisplay::ChatMessageDisplay(QWidget *parent)
 
 // 新增：实现提取时间戳的辅助方法
 QString ChatMessageDisplay::extractTimestampValueFromHtml(const QString& timestampHtml) const {
-    QRegularExpression re("<div style=\"text-align: center; margin-bottom: 5px;\"><span style=\"background-color: #aaaaaa; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">(\\d{2}:\\d{2})</span></div>");
+    QRegularExpression re("<div style=\"text-align: center; margin-bottom: 5px;\"><span style=\"background-color: #bbbbbb; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">(\\d{2}:\\d{2})</span></div>");
     QRegularExpressionMatch match = re.match(timestampHtml);
     if (match.hasMatch()) {
         return match.captured(1);

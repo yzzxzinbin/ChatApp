@@ -208,7 +208,7 @@ void NetworkEventHandler::handleNewMessageReceived(const QString &peerUuid, cons
     QString currentTime = QDateTime::currentDateTime().toString("HH:mm");
     QString timestampHtml = QString(
                                 "<div style=\"text-align: center; margin-bottom: 5px;\">"
-                                "<span style=\"background-color: #aaaaaa; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">%1</span>"
+                                "<span style=\"background-color: #bbbbbb; color: white; padding: 2px 8px; border-radius: 10px; font-size: 9pt;\">%1</span>"
                                 "</div>")
                                 .arg(currentTime);
 
