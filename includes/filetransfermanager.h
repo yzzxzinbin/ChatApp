@@ -6,20 +6,22 @@
 #include <QFile>
 #include <QTimer>
 #include <QSet> // For receivedOutOfOrderChunks keys
+#include "fileiomanager.h" // <-- Include FileIOManager
 
 class NetworkManager; // Forward declaration
 
 // Sliding Window Configuration
-const int DEFAULT_SEND_WINDOW_SIZE = 5; // Send up to 5 chunks before waiting for ACK for the first one
+const int DEFAULT_SEND_WINDOW_SIZE = 16; // Send up to 5 chunks before waiting for ACK for the first one
 const int DEFAULT_RECEIVE_WINDOW_SIZE = 10; // Receiver can buffer up to 10 out-of-order chunks
 const int FT_CHUNK_RETRANSMISSION_TIMEOUT_MS = 10000; // Timeout for retransmitting the base of the send window
+const int MAX_CONCURRENT_READS_PER_TRANSFER = 5;  // Example limit
+const int MAX_CONCURRENT_WRITES_PER_TRANSFER = 3; // Example limit
 
 struct FileTransferSession {
     QString transferID;
     QString peerUuid;
     QString fileName;
     qint64 fileSize;
-    QFile* file; // Represents the open file handle
     QString localFilePath; // Full path for sending, or chosen save path for receiving
     bool isSender;
     enum State { Idle, Offered, Accepted, Transferring, WaitingForAck, Completed, Rejected, Error, Paused } state; // Added Paused
@@ -36,7 +38,7 @@ struct FileTransferSession {
     QMap<qint64, QByteArray> receivedOutOfOrderChunks; // Buffer for out-of-order chunks
 
     FileTransferSession() : 
-        fileSize(0), file(nullptr), isSender(false), state(Idle), bytesTransferred(0), 
+        fileSize(0), isSender(false), state(Idle), bytesTransferred(0), 
         totalChunks(0), sendWindowBase(0), nextChunkToSendInWindow(0), 
         retransmissionTimer(nullptr), highestContiguousChunkReceived(-1) {}
 
@@ -50,7 +52,7 @@ struct FileTransferSession {
     }
     ~FileTransferSession() {
         stopAndClearRetransmissionTimer();
-        // QFile* file is managed by FileTransferManager's cleanupSession
+        // QFile* file is no longer part of the session directly
     }
 };
 
@@ -58,7 +60,7 @@ class FileTransferManager : public QObject
 {
     Q_OBJECT
 public:
-    explicit FileTransferManager(NetworkManager* networkManager, const QString& localUserUuid, QObject *parent = nullptr);
+    explicit FileTransferManager(NetworkManager* networkManager, FileIOManager* fileIOManager, const QString& localUserUuid, QObject *parent = nullptr); // Added FileIOManager
     ~FileTransferManager();
 
     // Called by UI to initiate sending a file
@@ -86,10 +88,17 @@ private slots:
     void processSendQueue(const QString& transferID); // Renamed from processNextChunk, drives sending multiple chunks
     void handleChunkRetransmissionTimeout(const QString& transferID); // Renamed from handleTransferTimeout
 
+    // New slots for FileIOManager signals
+    void handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QByteArray& data, bool success, const QString& error);
+    void handleChunkWritten(const QString& transferID, qint64 chunkID, qint64 bytesWritten, bool success, const QString& error);
+
 private:
     NetworkManager* m_networkManager;
+    FileIOManager* m_fileIOManager; // <-- Add FileIOManager instance
     QString m_localUserUuid;
     QMap<QString, FileTransferSession> m_sessions; // Key: TransferID
+    QMap<QString, int> m_outstandingReadRequests; // transferID -> count
+    QMap<QString, int> m_outstandingWriteRequests; // transferID -> count
 
     QString generateTransferID() const;
     void sendFileOffer(const QString& peerUuid, const QString& transferID, const QString& fileName, qint64 fileSize);

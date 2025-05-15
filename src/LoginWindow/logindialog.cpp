@@ -58,9 +58,9 @@ LoginDialog::LoginDialog(QWidget *parent)
         }
     }
 
-    // Attempt to connect to the database with specified credentials new pwd is 12345678
-    // Host: "127.0.0.1", DB: "QTWork", User: "root", Pass: "12345678", Port: 3306
-    if (!m_dbManager->connectToDatabase("127.0.0.1", "QTWork", "root", "12345678", 3306)) {
+    // Attempt to connect to the database with specified credentials new pwd is 123456
+    // Host: "127.0.0.1", DB: "QTWork", User: "root", Pass: "123456", Port: 3306
+    if (!m_dbManager->connectToDatabase("127.0.0.1", "QTWork", "root", "123456", 3306)) {
         // Error is handled by signal or logged by DatabaseManager
         QMessageBox::critical(this, tr("Database Error"), tr("Could not connect to the database 'QTWork'. Please ensure the database exists and credentials are correct. Login/Signup will not work."));
         // loginButton->setEnabled(false); // Example: disable buttons

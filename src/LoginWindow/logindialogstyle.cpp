@@ -225,7 +225,7 @@ void LoginDialog::setupUi()
 
     usernameEdit = new QLineEdit(formContainer);
     usernameEdit->setObjectName("usernameEdit");
-    usernameEdit->setPlaceholderText(tr("Username"));
+    usernameEdit->setPlaceholderText(tr("UserAccount"));
 
     passwordEdit = new QLineEdit(formContainer);
     passwordEdit->setObjectName("passwordEdit");

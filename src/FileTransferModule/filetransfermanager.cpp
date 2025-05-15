@@ -1,11 +1,12 @@
 #include "filetransfermanager.h"
-#include "networkmanager.h" // Include full definition
+#include "networkmanager.h"
+#include "fileiomanager.h" // Make sure this is included
 #include <QUuid>
 #include <QFileInfo>
 #include <QDebug>
 #include <QRegularExpression>
-#include <QStandardPaths> // For default save location
-#include <QBuffer> // For Base64 encoding/decoding
+#include <QStandardPaths>
+#include <QBuffer>
 
 // Helper function to extract attribute (can be moved to a shared utility if NetworkManager's one is not accessible/suitable)
 QString FileTransferManager::extractMessageAttribute(const QString& message, const QString& attributeName) const {
@@ -17,27 +18,27 @@ QString FileTransferManager::extractMessageAttribute(const QString& message, con
     return QString();
 }
 
-FileTransferManager::FileTransferManager(NetworkManager* networkManager, const QString& localUserUuid, QObject *parent)
-    : QObject(parent), m_networkManager(networkManager), m_localUserUuid(localUserUuid)
+FileTransferManager::FileTransferManager(NetworkManager* networkManager, FileIOManager* fileIOManager, const QString& localUserUuid, QObject *parent)
+    : QObject(parent), m_networkManager(networkManager), m_fileIOManager(fileIOManager), m_localUserUuid(localUserUuid)
 {
     if (!m_networkManager) {
         qCritical() << "FileTransferManager initialized with a null NetworkManager!";
     }
+    if (!m_fileIOManager) {
+        qCritical() << "FileTransferManager initialized with a null FileIOManager!";
+    }
+
+    // Connect signals from FileIOManager
+    connect(m_fileIOManager, &FileIOManager::chunkReadCompleted, this, &FileTransferManager::handleChunkReadForSending);
+    connect(m_fileIOManager, &FileIOManager::chunkWrittenCompleted, this, &FileTransferManager::handleChunkWritten);
 }
 
 FileTransferManager::~FileTransferManager()
 {
-    // Clean up any active sessions, close files, etc.
-    for (const QString& transferID : m_sessions.keys()) {
-        FileTransferSession& session = m_sessions[transferID];
-        session.stopAndClearRetransmissionTimer(); // Explicitly stop timer before map clear
-        if (session.file && session.file->isOpen()) {
-            session.file->close();
-        }
-        delete session.file;
-        session.file = nullptr;
-    }
+    // Clean up any active sessions
     m_sessions.clear();
+    m_outstandingReadRequests.clear();
+    m_outstandingWriteRequests.clear();
 }
 
 QString FileTransferManager::generateTransferID() const
@@ -67,9 +68,9 @@ QString FileTransferManager::requestSendFile(const QString& peerUuid, const QStr
     session.fileSize = fileInfo.size();
     session.isSender = true;
     session.state = FileTransferSession::Offered;
-    session.localFilePath = filePath; // Store the full path of the file to send
+    session.localFilePath = filePath;
     session.totalChunks = (session.fileSize + DEFAULT_CHUNK_SIZE - 1) / DEFAULT_CHUNK_SIZE;
-    
+
     m_sessions.insert(transferID, session);
 
     sendFileOffer(peerUuid, transferID, session.fileName, session.fileSize);
@@ -103,8 +104,8 @@ void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, con
     } else if (message.startsWith("<FT_ACCEPT")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
         QString receiverUuid = extractMessageAttribute(message, "ReceiverUUID");
-        QString savePathHint = extractMessageAttribute(message, "SavePathHint"); // Not strictly used by sender but good to parse
-         if (transferID.isEmpty() || receiverUuid.isEmpty() || receiverUuid != peerUuid) {
+        QString savePathHint = extractMessageAttribute(message, "SavePathHint");
+        if (transferID.isEmpty() || receiverUuid.isEmpty() || receiverUuid != peerUuid) {
             qWarning() << "FileTransferManager: Invalid FT_ACCEPT received:" << message;
             return;
         }
@@ -134,10 +135,10 @@ void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, con
         handleFileChunk(peerUuid, transferID, chunkID, chunkSize, data);
     } else if (message.startsWith("<FT_ACK_DATA")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
-        qint64 ackedChunkID = extractMessageAttribute(message, "ChunkID").toLongLong(); // This is highest contiguous received by peer
+        qint64 ackedChunkID = extractMessageAttribute(message, "ChunkID").toLongLong();
         QString ackingPeerUuid = extractMessageAttribute(message, "ReceiverUUID");
         if (transferID.isEmpty() || ackingPeerUuid.isEmpty() || ackingPeerUuid != peerUuid) {
-             qWarning() << "FileTransferManager: Invalid FT_ACK_DATA received:" << message;
+            qWarning() << "FileTransferManager: Invalid FT_ACK_DATA received:" << message;
             return;
         }
         handleDataAck(peerUuid, transferID, ackedChunkID);
@@ -153,7 +154,7 @@ void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, con
     } else if (message.startsWith("<FT_ACK_EOF")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
         QString ackingPeerUuid = extractMessageAttribute(message, "ReceiverUUID");
-         if (transferID.isEmpty() || ackingPeerUuid.isEmpty() || ackingPeerUuid != peerUuid) {
+        if (transferID.isEmpty() || ackingPeerUuid.isEmpty() || ackingPeerUuid != peerUuid) {
             qWarning() << "FileTransferManager: Invalid FT_ACK_EOF received:" << message;
             return;
         }
@@ -163,7 +164,7 @@ void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, con
         QString errorCode = extractMessageAttribute(message, "Code");
         QString errorMsg = extractMessageAttribute(message, "Message");
         QString originatorUuid = extractMessageAttribute(message, "OriginatorUUID");
-         if (transferID.isEmpty() || originatorUuid.isEmpty() || originatorUuid != peerUuid) {
+        if (transferID.isEmpty() || originatorUuid.isEmpty() || originatorUuid != peerUuid) {
             qWarning() << "FileTransferManager: Invalid FT_ERROR received:" << message;
             return;
         }
@@ -203,11 +204,11 @@ void FileTransferManager::acceptFileOffer(const QString& transferID, const QStri
         qWarning() << "FileTransferManager::acceptFileOffer: Invalid state for TransferID" << transferID;
         return;
     }
-    session.localFilePath = savePath; // Store the save path
+    session.localFilePath = savePath;
     session.state = FileTransferSession::Accepted;
-    sendAcceptMessage(session.peerUuid, transferID, savePath); // Pass savePath (or a hint)
+    sendAcceptMessage(session.peerUuid, transferID, savePath);
     qInfo() << "FileTransferManager: Accepted file offer for TransferID" << transferID << "from" << session.peerUuid << "Saving to:" << savePath;
-    
+
     prepareToReceiveFile(transferID, savePath);
 }
 
@@ -229,10 +230,8 @@ void FileTransferManager::rejectFileOffer(const QString& transferID, const QStri
     cleanupSession(transferID, false, tr("Rejected by user: %1").arg(reason));
 }
 
-
 void FileTransferManager::sendAcceptMessage(const QString& peerUuid, const QString& transferID, const QString& savePathHint)
 {
-    // savePathHint is optional, could be empty. Receiver might not need it.
     QString acceptMessage = FT_MSG_ACCEPT_FORMAT.arg(transferID).arg(m_localUserUuid).arg(savePathHint);
     m_networkManager->sendMessage(peerUuid, acceptMessage);
     qDebug() << "FileTransferManager: Sent file accept:" << acceptMessage << "to" << peerUuid;
@@ -255,7 +254,6 @@ void FileTransferManager::handleFileAccept(const QString& peerUuid, const QStrin
     FileTransferSession& session = m_sessions[transferID];
     if (!session.isSender || session.state != FileTransferSession::Offered) {
         qWarning() << "FileTransferManager::handleFileAccept: Invalid state for TransferID" << transferID;
-        // Optionally send an error back to peerUuid
         return;
     }
     if (session.peerUuid != peerUuid) {
@@ -265,7 +263,7 @@ void FileTransferManager::handleFileAccept(const QString& peerUuid, const QStrin
 
     session.state = FileTransferSession::Accepted;
     qInfo() << "FileTransferManager: File offer accepted by" << peerUuid << "for TransferID" << transferID;
-    
+
     startActualFileSend(transferID);
 }
 
@@ -277,7 +275,7 @@ void FileTransferManager::handleFileReject(const QString& peerUuid, const QStrin
     }
     FileTransferSession& session = m_sessions[transferID];
     if (!session.isSender || session.state != FileTransferSession::Offered) {
-         qWarning() << "FileTransferManager::handleFileReject: Invalid state for TransferID" << transferID;
+        qWarning() << "FileTransferManager::handleFileReject: Invalid state for TransferID" << transferID;
         return;
     }
     if (session.peerUuid != peerUuid) {
@@ -297,105 +295,92 @@ void FileTransferManager::startActualFileSend(const QString& transferID) {
     if (session.localFilePath.isEmpty()) {
         qWarning() << "FileTransferManager: No local file path for sending session" << transferID;
         cleanupSession(transferID, false, tr("Internal error: File path missing."));
+        sendError(session.peerUuid, transferID, "INTERNAL_ERROR", "File path missing for sender.");
         return;
     }
 
-    session.file = new QFile(session.localFilePath);
-    if (!session.file->open(QIODevice::ReadOnly)) {
-        qWarning() << "FileTransferManager: Could not open file for sending:" << session.localFilePath << session.file->errorString();
-        cleanupSession(transferID, false, tr("Could not open file: %1").arg(session.file->errorString()));
-        delete session.file;
-        session.file = nullptr;
-        return;
-    }
-    
     session.state = FileTransferSession::Transferring;
     session.sendWindowBase = 0;
     session.nextChunkToSendInWindow = 0;
-    session.bytesTransferred = 0; // Bytes ACKed by peer
+    session.bytesTransferred = 0;
+    m_outstandingReadRequests[transferID] = 0;
+
     qInfo() << "FileTransferManager: Starting to send file" << session.fileName << "for TransferID" << transferID;
     emit fileTransferStarted(transferID, session.peerUuid, session.fileName, true);
-    processSendQueue(transferID); // Start sending chunks
+    processSendQueue(transferID);
 }
 
 void FileTransferManager::prepareToReceiveFile(const QString& transferID, const QString& savePath) {
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
 
-    session.file = new QFile(savePath);
-    if (!session.file->open(QIODevice::WriteOnly)) {
-        qWarning() << "FileTransferManager: Could not open file for receiving:" << savePath << session.file->errorString();
-        cleanupSession(transferID, false, tr("Could not create/open file for saving: %1").arg(session.file->errorString()));
-        sendError(session.peerUuid, transferID, "FILE_OPEN_ERROR_RECEIVER", "Could not open file for saving.");
-        delete session.file;
-        session.file = nullptr;
-        return;
-    }
-    
     session.state = FileTransferSession::Transferring;
-    session.highestContiguousChunkReceived = -1; // No chunks received yet
+    session.highestContiguousChunkReceived = -1;
     session.receivedOutOfOrderChunks.clear();
-    session.bytesTransferred = 0; // Bytes written to disk
-    qInfo() << "FileTransferManager: Preparing to receive file" << session.fileName << "for TransferID" << transferID;
+    session.bytesTransferred = 0;
+    m_outstandingWriteRequests[transferID] = 0;
+
+    qInfo() << "FileTransferManager: Preparing to receive file" << session.fileName << "for TransferID" << transferID << "to" << session.localFilePath;
     emit fileTransferStarted(transferID, session.peerUuid, session.fileName, false);
-    // Receiver waits for the first chunk.
 }
 
 void FileTransferManager::processSendQueue(const QString& transferID) {
-    if (!m_sessions.contains(transferID)) return;
+    if (!m_sessions.contains(transferID) || !m_fileIOManager) return;
     FileTransferSession& session = m_sessions[transferID];
 
-    if (!session.isSender || !session.file || session.state != FileTransferSession::Transferring) {
-        // If state is Paused, don't send. If it's WaitingForAck, the window is full or an ACK is pending.
+    if (!session.isSender || session.state != FileTransferSession::Transferring) {
         return;
     }
 
-    // Send new chunks as long as the window is not full
-    // and we haven't sent all chunks for the current window pass or all file chunks.
     while (session.nextChunkToSendInWindow < session.sendWindowBase + DEFAULT_SEND_WINDOW_SIZE &&
-           session.nextChunkToSendInWindow < session.totalChunks) {
+           session.nextChunkToSendInWindow < session.totalChunks &&
+           m_outstandingReadRequests.value(transferID, 0) < MAX_CONCURRENT_READS_PER_TRANSFER) {
         
         qint64 currentChunkID = session.nextChunkToSendInWindow;
-        
-        // Seek to the correct position for the current chunk
         qint64 offset = currentChunkID * DEFAULT_CHUNK_SIZE;
-        if (!session.file->seek(offset)) {
-            qWarning() << "FileTransferManager::processSendQueue: Seek failed for chunk" << currentChunkID << "Offset:" << offset;
-            cleanupSession(transferID, false, tr("File seek error during transfer."));
-            sendError(session.peerUuid, transferID, "FILE_SEEK_ERROR", "Error seeking file for chunk.");
-            return;
-        }
-
-        QByteArray chunkData = session.file->read(DEFAULT_CHUNK_SIZE);
-        if (chunkData.isEmpty() && !session.file->atEnd()) { // Read error if not at EOF but got empty
-             qWarning() << "FileTransferManager::processSendQueue: Read empty chunk before EOF for" << transferID << "ChunkID:" << currentChunkID;
-             cleanupSession(transferID, false, tr("File read error during transfer."));
-             sendError(session.peerUuid, transferID, "FILE_READ_ERROR", "Error reading file chunk.");
-             return;
-        }
-        if (chunkData.isEmpty() && session.file->atEnd() && (currentChunkID * DEFAULT_CHUNK_SIZE < session.fileSize)) {
-            // Should not happen if totalChunks is calculated correctly based on fileSize
-            qWarning() << "FileTransferManager::processSendQueue: Read empty chunk at EOF but not all bytes sent for" << transferID << "ChunkID:" << currentChunkID;
-            // This might indicate an issue with fileSize or totalChunks calculation.
-            // Proceeding might send an empty chunk if it's the last one and size is 0.
-        }
-
-
-        sendChunkData(transferID, currentChunkID, chunkData);
+        
+        qDebug() << "FileTransferManager: Requesting read for chunk" << currentChunkID << "for" << transferID;
+        m_fileIOManager->requestReadFileChunk(transferID, currentChunkID, session.localFilePath, offset, DEFAULT_CHUNK_SIZE);
+        
+        m_outstandingReadRequests[transferID]++;
         session.nextChunkToSendInWindow++;
-
-        // If this is the first chunk in the window being sent (or re-sent), start its timer
-        if (currentChunkID == session.sendWindowBase) {
-            startRetransmissionTimer(transferID);
-        }
     }
-
-    // If all chunks have been sent and ACKed (which handleDataAck will determine by comparing sendWindowBase to totalChunks)
-    // then handleDataAck will call sendEOF.
-    // If nextChunkToSendInWindow has reached totalChunks, all data is "in flight" or ACKed.
-    // We wait for ACKs.
 }
 
+void FileTransferManager::handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QByteArray& data, bool success, const QString& error) {
+    if (!m_sessions.contains(transferID)) {
+        m_outstandingReadRequests[transferID]--;
+        return;
+    }
+    m_outstandingReadRequests[transferID]--;
+    FileTransferSession& session = m_sessions[transferID];
+
+    if (!success) {
+        qWarning() << "FileTransferManager: Failed to read chunk" << chunkID << "for" << transferID << ":" << error;
+        sendError(session.peerUuid, transferID, "FILE_READ_ERROR_ASYNC", error);
+        cleanupSession(transferID, false, tr("File read error: %1").arg(error));
+        return;
+    }
+
+    if (session.state != FileTransferSession::Transferring && session.state != FileTransferSession::WaitingForAck) {
+         qWarning() << "FileTransferManager::handleChunkReadForSending: Session" << transferID << "not in transferable state. Chunk" << chunkID;
+         return;
+    }
+    
+    if (chunkID < session.sendWindowBase) {
+        qDebug() << "FileTransferManager: Ignoring stale read for chunk" << chunkID << "(sendWindowBase is" << session.sendWindowBase << ")";
+        processSendQueue(transferID);
+        return;
+    }
+
+    sendChunkData(transferID, chunkID, data);
+
+    if (chunkID == session.sendWindowBase) {
+        startRetransmissionTimer(transferID);
+    }
+
+    processSendQueue(transferID);
+}
 
 void FileTransferManager::sendChunkData(const QString& transferID, qint64 chunkID, const QByteArray& chunkData) {
     if (!m_sessions.contains(transferID)) return;
@@ -408,106 +393,114 @@ void FileTransferManager::sendChunkData(const QString& transferID, qint64 chunkI
                                            .arg(dataB64);
     m_networkManager->sendMessage(session.peerUuid, chunkMessage);
     qDebug() << "FileTransferManager: Sent chunk" << chunkID << "for" << transferID << "Size:" << chunkData.size();
-    // Progress for sender is updated upon receiving ACKs in handleDataAck
 }
 
-
 void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 chunkSize, const QByteArray& data) {
-    if (!m_sessions.contains(transferID)) {
-        qWarning() << "FileTransferManager::handleFileChunk: Unknown TransferID" << transferID;
-        sendError(peerUuid, transferID, "INVALID_TRANSFER_ID", "Unknown transfer ID.");
+    if (!m_sessions.contains(transferID) || !m_fileIOManager) {
+        qWarning() << "FileTransferManager::handleFileChunk: Unknown TransferID" << transferID << "or no FileIOManager";
+        if (m_sessions.contains(transferID)) sendError(peerUuid, transferID, "INVALID_TRANSFER_ID", "Unknown transfer ID or internal error.");
         return;
     }
     FileTransferSession& session = m_sessions[transferID];
 
-    if (session.isSender || !session.file || !session.file->isOpen() || 
-        (session.state != FileTransferSession::Transferring && session.state != FileTransferSession::Accepted)) { // Accept initial chunks in Accepted state too
+    if (session.isSender || 
+        (session.state != FileTransferSession::Transferring && session.state != FileTransferSession::Accepted)) {
         qWarning() << "FileTransferManager::handleFileChunk: Invalid state for receiving chunk" << transferID << "State:" << session.state;
         return;
     }
     if (session.state == FileTransferSession::Accepted) session.state = FileTransferSession::Transferring;
 
-
-    // Check if chunk is within the expected receive window or is the next expected chunk
     if (chunkID < session.highestContiguousChunkReceived + 1 || 
         chunkID >= session.highestContiguousChunkReceived + 1 + DEFAULT_RECEIVE_WINDOW_SIZE) {
-        // This chunk is either a duplicate of an already processed one, or too far ahead.
-        // If it's an old duplicate, we still ACK our current highestContiguous to help sender.
-        // If it's too far ahead, we also just ACK our current highest.
         qWarning() << "FileTransferManager::handleFileChunk: Chunk" << chunkID << "out of window for" << transferID
                    << ". Expected range: [" << (session.highestContiguousChunkReceived + 1)
                    << "-" << (session.highestContiguousChunkReceived + DEFAULT_RECEIVE_WINDOW_SIZE) << "]";
-        sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived); // ACK what we have
+        sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived); 
         return;
     }
 
     if (chunkID == session.highestContiguousChunkReceived + 1) {
-        // This is the next expected chunk in sequence
-        qint64 bytesWritten = session.file->write(data);
-        if (bytesWritten != chunkSize) {
-            qWarning() << "FileTransferManager::handleFileChunk: File write error for" << transferID << session.file->errorString();
-            cleanupSession(transferID, false, tr("Error writing to file: %1").arg(session.file->errorString()));
-            sendError(peerUuid, transferID, "FILE_WRITE_ERROR", "Error writing received chunk to file.");
-            return;
+        if (m_outstandingWriteRequests.value(transferID, 0) >= MAX_CONCURRENT_WRITES_PER_TRANSFER) {
+            qDebug() << "FileTransferManager: Max concurrent writes reached for" << transferID << ". Buffering chunk" << chunkID;
+            if (!session.receivedOutOfOrderChunks.contains(chunkID)) {
+                 session.receivedOutOfOrderChunks.insert(chunkID, data);
+            }
+            sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived);
+        } else {
+            qint64 expectedOffset = session.bytesTransferred;
+            qDebug() << "FileTransferManager: Requesting write for chunk" << chunkID << "at offset" << expectedOffset;
+            m_fileIOManager->requestWriteFileChunk(transferID, chunkID, session.localFilePath, expectedOffset, data);
+            m_outstandingWriteRequests[transferID]++;
         }
-        session.bytesTransferred += bytesWritten;
-        session.highestContiguousChunkReceived = chunkID;
-        emit fileTransferProgress(transferID, session.bytesTransferred, session.fileSize);
-        qDebug() << "FileTransferManager: Received and wrote chunk" << chunkID << "for" << transferID;
-
-        // Try to process any buffered chunks that are now contiguous
-        processBufferedChunks(transferID);
-
-    } else { // Chunk is within the window but out of order
+    } else {
         if (!session.receivedOutOfOrderChunks.contains(chunkID)) {
             session.receivedOutOfOrderChunks.insert(chunkID, data);
             qDebug() << "FileTransferManager: Buffered out-of-order chunk" << chunkID << "for" << transferID;
         } else {
             qDebug() << "FileTransferManager: Received duplicate out-of-order chunk" << chunkID << "for" << transferID;
-            // Already buffered, or a duplicate of a future chunk.
         }
+        sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived);
+    }
+}
+
+void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 chunkID, qint64 bytesWritten, bool success, const QString& error) {
+    if (!m_sessions.contains(transferID)) {
+        m_outstandingWriteRequests[transferID]--;
+        return;
+    }
+    m_outstandingWriteRequests[transferID]--;
+    FileTransferSession& session = m_sessions[transferID];
+
+    if (!success) {
+        qWarning() << "FileTransferManager: Failed to write chunk" << chunkID << "for" << transferID << ":" << error;
+        sendError(session.peerUuid, transferID, "FILE_WRITE_ERROR_ASYNC", error);
+        cleanupSession(transferID, false, tr("File write error: %1").arg(error));
+        return;
     }
     
-    // Always ACK the highest contiguous chunk received so far
-    sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived);
+    if (chunkID == session.highestContiguousChunkReceived + 1) {
+        session.bytesTransferred += bytesWritten;
+        session.highestContiguousChunkReceived = chunkID;
+        emit fileTransferProgress(transferID, session.bytesTransferred, session.fileSize);
+        qDebug() << "FileTransferManager: Successfully wrote chunk" << chunkID << "for" << transferID << ". Total written:" << session.bytesTransferred;
+
+        processBufferedChunks(transferID);
+        sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+
+        if (session.highestContiguousChunkReceived == session.totalChunks - 1) {
+            qInfo() << "FileTransferManager: All chunks appear to be written for receiver " << transferID;
+        }
+
+    } else {
+        qWarning() << "FileTransferManager: Wrote chunk" << chunkID << "but expected" << (session.highestContiguousChunkReceived + 1);
+        sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+    }
 }
 
 void FileTransferManager::processBufferedChunks(const QString& transferID) {
-    if (!m_sessions.contains(transferID)) return;
+    if (!m_sessions.contains(transferID) || !m_fileIOManager) return;
     FileTransferSession& session = m_sessions[transferID];
 
-    bool chunkProcessed = true;
-    while(chunkProcessed) {
-        chunkProcessed = false;
-        qint64 nextExpectedChunk = session.highestContiguousChunkReceived + 1;
-        if (session.receivedOutOfOrderChunks.contains(nextExpectedChunk)) {
-            QByteArray data = session.receivedOutOfOrderChunks.take(nextExpectedChunk);
-            qint64 bytesWritten = session.file->write(data);
-            if (bytesWritten != data.size()) {
-                 qWarning() << "FileTransferManager::processBufferedChunks: File write error for buffered chunk" << nextExpectedChunk << session.file->errorString();
-                 cleanupSession(transferID, false, tr("Error writing buffered chunk to file: %1").arg(session.file->errorString()));
-                 sendError(session.peerUuid, transferID, "FILE_WRITE_ERROR_BUFFERED", "Error writing buffered chunk.");
-                 return; // Critical error
-            }
-            session.bytesTransferred += bytesWritten;
-            session.highestContiguousChunkReceived = nextExpectedChunk;
-            emit fileTransferProgress(transferID, session.bytesTransferred, session.fileSize);
-            qDebug() << "FileTransferManager: Wrote buffered chunk" << nextExpectedChunk << "for" << transferID;
-            chunkProcessed = true; // A chunk was processed, loop again
-        }
+    qint64 nextExpectedChunk = session.highestContiguousChunkReceived + 1;
+    if (session.receivedOutOfOrderChunks.contains(nextExpectedChunk) &&
+        m_outstandingWriteRequests.value(transferID, 0) < MAX_CONCURRENT_WRITES_PER_TRANSFER) {
+
+        QByteArray data = session.receivedOutOfOrderChunks.take(nextExpectedChunk); 
+        qint64 expectedOffset = session.bytesTransferred; 
+
+        qDebug() << "FileTransferManager: Requesting write for buffered chunk" << nextExpectedChunk << "for" << transferID << "at offset" << expectedOffset;
+        m_fileIOManager->requestWriteFileChunk(transferID, nextExpectedChunk, session.localFilePath, expectedOffset, data);
+        m_outstandingWriteRequests[transferID]++;
     }
 }
 
-
 void FileTransferManager::sendDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID) {
-    // ackedChunkID is the highest *contiguous* chunk ID successfully received and processed.
     QString ackMsg = FT_MSG_DATA_ACK_FORMAT.arg(transferID).arg(ackedChunkID).arg(m_localUserUuid);
     m_networkManager->sendMessage(peerUuid, ackMsg);
     qDebug() << "FileTransferManager: Sent ACK for highest contiguous chunk" << ackedChunkID << "for" << transferID;
 }
 
 void FileTransferManager::handleDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID) {
-    // ackedChunkID is the highest contiguous chunk ID the peer has received.
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
 
@@ -519,54 +512,46 @@ void FileTransferManager::handleDataAck(const QString& peerUuid, const QString& 
     qDebug() << "FileTransferManager: Received ACK for chunk up to" << ackedChunkID << "for" << transferID << ". Current sendWindowBase:" << session.sendWindowBase;
 
     if (ackedChunkID >= session.sendWindowBase) {
-        stopRetransmissionTimer(transferID); // Stop timer for the old base
+        stopRetransmissionTimer(transferID);
 
-        // Update bytesTransferred based on newly ACKed chunks
-        qint64 newlyAckedChunksCount = (ackedChunkID + 1) - session.sendWindowBase;
-        if (newlyAckedChunksCount > 0) {
-            session.bytesTransferred = qMin(session.fileSize, (ackedChunkID + 1) * DEFAULT_CHUNK_SIZE);
+        qint64 oldSendWindowBase = session.sendWindowBase;
+        session.sendWindowBase = ackedChunkID + 1;
+
+        if (session.sendWindowBase > oldSendWindowBase) {
+            session.bytesTransferred = qMin(session.fileSize, session.sendWindowBase * DEFAULT_CHUNK_SIZE);
+            if (session.sendWindowBase >= session.totalChunks) {
+                session.bytesTransferred = session.fileSize;
+            }
             emit fileTransferProgress(transferID, session.bytesTransferred, session.fileSize);
         }
         
-        session.sendWindowBase = ackedChunkID + 1; // Slide window
-
         if (session.sendWindowBase >= session.totalChunks) {
-            // All chunks have been ACKed
             qInfo() << "FileTransferManager: All chunks ACKed for" << transferID;
             sendEOF(transferID);
         } else {
-            session.nextChunkToSendInWindow = qMax(session.nextChunkToSendInWindow, session.sendWindowBase);
-            session.state = FileTransferSession::Transferring; // Ensure state is ready for more sends
-            processSendQueue(transferID); // Try to send more chunks from the new window base
-
-            if (session.sendWindowBase < session.nextChunkToSendInWindow) { 
-                 startRetransmissionTimer(transferID);
-            }
+            session.state = FileTransferSession::Transferring;
+            processSendQueue(transferID);
         }
     } else {
         qDebug() << "FileTransferManager: Received old/duplicate ACK for" << ackedChunkID << "(current base" << session.sendWindowBase << ")";
     }
 }
 
-
 void FileTransferManager::sendEOF(const QString& transferID) {
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
     
-    stopRetransmissionTimer(transferID); // Stop any chunk retransmission timers
+    stopRetransmissionTimer(transferID);
 
-    QString finalChecksum = "NOT_IMPLEMENTED"; // Placeholder
+    QString finalChecksum = "NOT_IMPLEMENTED";
     QString eofMsg = FT_MSG_EOF_FORMAT.arg(transferID).arg(session.totalChunks).arg(finalChecksum); 
     m_networkManager->sendMessage(session.peerUuid, eofMsg);
-    session.state = FileTransferSession::WaitingForAck; // Waiting for EOF_ACK
+    session.state = FileTransferSession::WaitingForAck;
     
-    session.sendWindowBase = session.totalChunks; // Mark as if we are waiting for an ACK for a "virtual" chunk past the last one.
-    startRetransmissionTimer(transferID); // This timer will now timeout if EOF_ACK is not received.
+    session.sendWindowBase = session.totalChunks;
+    startRetransmissionTimer(transferID);
 
     qInfo() << "FileTransferManager: Sent EOF for" << transferID << "Total Chunks:" << session.totalChunks;
-    if (session.file && session.file->isOpen()) {
-        session.file->close(); // Sender closes file after sending EOF
-    }
 }
 
 void FileTransferManager::handleEOF(const QString& peerUuid, const QString& transferID, qint64 totalChunksReported, const QString& finalChecksum) {
@@ -579,15 +564,23 @@ void FileTransferManager::handleEOF(const QString& peerUuid, const QString& tran
         return;
     }
     
+    if (m_outstandingWriteRequests.value(transferID, 0) > 0) {
+        qWarning() << "FileTransferManager::handleEOF: Received EOF for" << transferID << "but" << m_outstandingWriteRequests.value(transferID, 0) << "writes are still outstanding. Deferring EOF processing.";
+        return;
+    }
+
     if (session.highestContiguousChunkReceived != session.totalChunks - 1) {
         qWarning() << "FileTransferManager::handleEOF: Received EOF for" << transferID 
                    << "but not all chunks are contiguously received. Last received:" << session.highestContiguousChunkReceived
                    << "Total expected:" << (session.totalChunks -1);
         processBufferedChunks(transferID);
-        if (session.highestContiguousChunkReceived != session.totalChunks -1) {
+        if (session.highestContiguousChunkReceived != session.totalChunks -1 && m_outstandingWriteRequests.value(transferID, 0) == 0) {
             sendError(peerUuid, transferID, "EOF_WITH_MISSING_CHUNKS", "Received EOF but chunks are missing.");
             cleanupSession(transferID, false, tr("Transfer incomplete: EOF received with missing chunks."));
             return;
+        } else if (session.highestContiguousChunkReceived != session.totalChunks -1) {
+            qInfo() << "FileTransferManager::handleEOF: EOF for" << transferID << "received, but waiting for pending writes to complete for missing chunks.";
+            return; 
         }
     }
     
@@ -597,9 +590,6 @@ void FileTransferManager::handleEOF(const QString& peerUuid, const QString& tran
     }
 
     qInfo() << "FileTransferManager: Received EOF for" << transferID << ". File" << session.fileName << "received.";
-    if (session.file && session.file->isOpen()) {
-        session.file->close(); // Receiver closes file after processing EOF
-    }
     sendEOFAck(peerUuid, transferID);
     cleanupSession(transferID, true, tr("File received successfully."));
 }
@@ -612,7 +602,7 @@ void FileTransferManager::handleEOFAck(const QString& peerUuid, const QString& t
         qWarning() << "FileTransferManager::handleEOFAck: Received EOF_ACK in invalid state for" << transferID;
         return;
     }
-    stopRetransmissionTimer(transferID); // Stop the EOF_ACK timer
+    stopRetransmissionTimer(transferID);
     qInfo() << "FileTransferManager: Received EOF_ACK for" << transferID << ". File" << session.fileName << "sent successfully.";
     cleanupSession(transferID, true, tr("File sent successfully."));
 }
@@ -645,14 +635,10 @@ void FileTransferManager::cleanupSession(const QString& transferID, bool success
     if (!m_sessions.contains(transferID)) return;
     
     FileTransferSession session = m_sessions.take(transferID); 
-    session.stopAndClearRetransmissionTimer(); // Ensure timer is stopped and deleted
+    session.stopAndClearRetransmissionTimer();
 
-    if (session.file) {
-        if (session.file->isOpen()) {
-            session.file->close();
-        }
-        delete session.file;
-    }
+    m_outstandingReadRequests.remove(transferID);
+    m_outstandingWriteRequests.remove(transferID);
     
     if (success) {
         emit fileTransferFinished(transferID, session.peerUuid, session.fileName, true, message);
@@ -663,12 +649,11 @@ void FileTransferManager::cleanupSession(const QString& transferID, bool success
     qInfo() << "FileTransferManager: Cleaned up session" << transferID << (success ? "Successfully" : "Unsuccessfully");
 }
 
-
 void FileTransferManager::startRetransmissionTimer(const QString& transferID) {
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
     
-    session.stopAndClearRetransmissionTimer(); // Stop and delete any existing timer for this session
+    session.stopAndClearRetransmissionTimer();
 
     session.retransmissionTimer = new QTimer(this);
     session.retransmissionTimer->setSingleShot(true);
@@ -706,10 +691,11 @@ void FileTransferManager::handleChunkRetransmissionTimeout(const QString& transf
 
     qWarning() << "FileTransferManager: Retransmission Timeout for transfer" << transferID << "ChunkID (Base):" << session.sendWindowBase;
     
-    session.nextChunkToSendInWindow = session.sendWindowBase; // Reset to resend from the base
-    session.state = FileTransferSession::Transferring; // Ensure state allows sending
+    m_outstandingReadRequests[transferID] = 0; 
+    session.nextChunkToSendInWindow = session.sendWindowBase;
+    session.state = FileTransferSession::Transferring;
     
-    qInfo() << "FileTransferManager: Retransmitting from chunk" << session.sendWindowBase << "for transfer" << transferID;
-    processSendQueue(transferID); 
+    qInfo() << "FileTransferManager: Retransmitting by re-requesting read for chunk" << session.sendWindowBase << "for transfer" << transferID;
+    processSendQueue(transferID);
 }
 

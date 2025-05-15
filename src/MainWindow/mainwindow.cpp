@@ -8,7 +8,8 @@
 #include "formattingtoolbarhandler.h"
 #include "networkeventhandler.h"
 #include "chathistorymanager.h"
-#include "filetransfermanager.h" // <-- Add this
+#include "filetransfermanager.h"
+#include "fileiomanager.h" // Add this
 
 #include <QApplication>
 #include <QListWidget>
@@ -34,8 +35,8 @@
 #include <QDebug>
 #include <QEvent>
 #include <QDateTime>
-#include <QFileDialog> // <-- Add this for file dialog
-#include <QStandardPaths> // <-- Add this for standard paths
+#include <QFileDialog>
+#include <QStandardPaths>
 
 MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     : QMainWindow(parent),
@@ -52,7 +53,7 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
       udpBroadcastIntervalSeconds(5),
       localOutgoingPort(0),
       useSpecificOutgoingPort(false),
-      fileTransferManager(nullptr) // <-- Initialize to nullptr
+      fileTransferManager(nullptr)
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     loadCurrentUserIdentity();
@@ -64,8 +65,11 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
     networkManager->setListenPreferences(localListenPort, autoNetworkListeningEnabled);
     networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
 
-    // Instantiate FileTransferManager AFTER NetworkManager and localUserUuid are set
-    fileTransferManager = new FileTransferManager(networkManager, localUserUuid, this); // <-- Instantiate this
+    // Initialize FileIOManager
+    FileIOManager *fileIOManager = new FileIOManager(this); // Or as a member if needed elsewhere
+
+    // Initialize FileTransferManager
+    fileTransferManager = new FileTransferManager(networkManager, fileIOManager, localUserUuid, this); // Pass fileIOManager
 
     contactManager = new ContactManager(networkManager, this);
     connect(contactManager, &ContactManager::contactAdded, this, &MainWindow::handleContactAdded);
@@ -86,7 +90,7 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
         activeChatContentsWidget,
         &chatHistories,
         this,
-        fileTransferManager, // <-- Pass to NetworkEventHandler
+        fileTransferManager,
         this);
 
     setWindowTitle("ChatApp - " + localUserName + "By CCZU_ZX");

@@ -34,7 +34,7 @@ const QString FT_MSG_EOF_FORMAT = QStringLiteral("<FT_EOF TransferID=\"%1\" Tota
 const QString FT_MSG_EOF_ACK_FORMAT = QStringLiteral("<FT_ACK_EOF TransferID=\"%1\" ReceiverUUID=\"%2\"/>");
 const QString FT_MSG_ERROR_FORMAT = QStringLiteral("<FT_ERROR TransferID=\"%1\" Code=\"%2\" Message=\"%3\" OriginatorUUID=\"%4\"/>");
 
-const qint64 DEFAULT_CHUNK_SIZE = 64 * 1024; // 64KB chunks
+const qint64 DEFAULT_CHUNK_SIZE = 2048 * 1024; // 2048KB chunks
 
 class NetworkManager : public QObject
 {

@@ -33,6 +33,7 @@ set(PROJECT_HEADERS
     includes/settingsdialog.h
     includes/databasemanager.h
     includes/filetransfermanager.h
+    includes/fileiomanager.h
 )
 
 # Define source files
@@ -67,6 +68,7 @@ set(PROJECT_SOURCES
 
     # FileTransfer sources
     src/FileTransferModule/filetransfermanager.cpp
+    src/FileTransferModule/fileiomanager.cpp
 
     # Resources
     src/ResourceImport/resources.qrc
