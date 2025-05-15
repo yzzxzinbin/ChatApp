@@ -11,6 +11,7 @@ class QLabel;
 class QSpinBox;
 class QCheckBox;
 class QTabWidget;
+class QFileDialog; // 新增
 QT_END_NAMESPACE
 
 class SettingsDialog : public QDialog
@@ -26,8 +27,11 @@ public:
                             bool currentUseSpecificOutgoing,
                             bool currentUdpDiscoveryEnabled,
                             quint16 currentUdpDiscoveryPort,
-                            bool currentContinuousUdpBroadcastEnabled, // Added
-                            int currentUdpBroadcastInterval,          // Added
+                            bool currentContinuousUdpBroadcastEnabled,
+                            int currentUdpBroadcastInterval,
+                            // 新增参数
+                            const QString &currentDefaultDownloadDir = QString(),
+                            bool currentRequireFileAccept = true,
                             QWidget *parent = nullptr);
     ~SettingsDialog();
 
@@ -39,14 +43,20 @@ public:
     bool isSpecificOutgoingPortSelected() const;
     bool isUdpDiscoveryEnabled() const;
     quint16 getUdpDiscoveryPort() const;
-    bool isContinuousUdpBroadcastEnabled() const; // Added
-    int getUdpBroadcastInterval() const;          // Added
+    bool isContinuousUdpBroadcastEnabled() const;
+    int getUdpBroadcastInterval() const;
+    // 新增getter
+    QString getDefaultDownloadDir() const;
+    bool isRequireFileAccept() const;
 
     void updateFields(const QString &userName, const QString &uuid,
                       quint16 listenPort, bool enableListening,
                       quint16 outgoingPort, bool useSpecificOutgoing,
                       bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                      bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
+                      bool enableContinuousUdpBroadcast, int udpBroadcastInterval,
+                      // 新增参数
+                      const QString &defaultDownloadDir,
+                      bool requireFileAccept);
 
 signals:
     void settingsApplied(const QString &userName,
@@ -54,7 +64,10 @@ signals:
                          bool enableListening,
                          quint16 outgoingPort, bool useSpecificOutgoing,
                          bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                         bool enableContinuousUdpBroadcast, int udpBroadcastInterval); // Added
+                         bool enableContinuousUdpBroadcast, int udpBroadcastInterval,
+                         // 新增参数
+                         const QString &defaultDownloadDir,
+                         bool requireFileAccept);
     void retryListenNowRequested();
     void manualUdpBroadcastRequested();
 
@@ -65,7 +78,8 @@ private slots:
     void onRetryListenNowClicked();
     void onUdpDiscoveryEnableChanged(bool checked);
     void onManualBroadcastClicked();
-    void onUdpContinuousBroadcastChanged(bool checked); // Added
+    void onUdpContinuousBroadcastChanged(bool checked);
+    void onSelectDownloadDirClicked(); // 新增槽
 
 private:
     void setupUI();
@@ -86,8 +100,13 @@ private:
     QCheckBox *udpDiscoveryCheckBox; 
     QSpinBox *udpDiscoveryPortSpinBox; 
     QPushButton *manualBroadcastButton; 
-    QCheckBox *enableContinuousUdpBroadcastCheckBox; // Added
-    QSpinBox *udpBroadcastIntervalSpinBox;           // Added
+    QCheckBox *enableContinuousUdpBroadcastCheckBox;
+    QSpinBox *udpBroadcastIntervalSpinBox;
+
+    // 新增UI元素
+    QLineEdit *downloadDirEdit;
+    QPushButton *selectDownloadDirButton;
+    QCheckBox *requireFileAcceptCheckBox;
 
     QPushButton *saveButton;
     QPushButton *cancelButton;
@@ -101,8 +120,11 @@ private:
     bool initialUseSpecificOutgoing;
     bool initialUdpDiscoveryEnabled; 
     quint16 initialUdpDiscoveryPort; 
-    bool initialContinuousUdpBroadcastEnabled; // Added
-    int initialUdpBroadcastInterval;           // Added
+    bool initialContinuousUdpBroadcastEnabled;
+    int initialUdpBroadcastInterval;
+    // 新增初始值
+    QString initialDefaultDownloadDir;
+    bool initialRequireFileAccept;
 };
 
 #endif // SETTINGSDIALOG_H

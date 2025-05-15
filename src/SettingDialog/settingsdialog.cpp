@@ -9,7 +9,8 @@
 #include <QMessageBox>
 #include <QCheckBox>
 #include <QTabWidget>
-#include <QGroupBox> // For grouping within tabs
+#include <QGroupBox>
+#include <QFileDialog>
 
 SettingsDialog::SettingsDialog(const QString &currentUserName,
                                const QString &currentUserUuid,
@@ -18,9 +19,11 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
                                quint16 currentOutgoingPort,
                                bool currentUseSpecificOutgoing,
                                bool currentUdpDiscoveryEnabled,
-                               quint16 currentUdpDiscoveryPort, // Added
-                               bool currentEnableContinuousUdpBroadcast, // Added
-                               int currentUdpBroadcastInterval, // Added
+                               quint16 currentUdpDiscoveryPort,
+                               bool currentEnableContinuousUdpBroadcast,
+                               int currentUdpBroadcastInterval,
+                               const QString &currentDefaultDownloadDir,
+                               bool currentRequireFileAccept,
                                QWidget *parent)
     : QDialog(parent),
       initialUserName(currentUserName),
@@ -30,9 +33,11 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
       initialOutgoingPort(currentOutgoingPort),
       initialUseSpecificOutgoing(currentUseSpecificOutgoing),
       initialUdpDiscoveryEnabled(currentUdpDiscoveryEnabled),
-      initialUdpDiscoveryPort(currentUdpDiscoveryPort), // Added
-      initialContinuousUdpBroadcastEnabled(currentEnableContinuousUdpBroadcast), // 修正变量名
-      initialUdpBroadcastInterval(currentUdpBroadcastInterval) // Added
+      initialUdpDiscoveryPort(currentUdpDiscoveryPort),
+      initialContinuousUdpBroadcastEnabled(currentEnableContinuousUdpBroadcast),
+      initialUdpBroadcastInterval(currentUdpBroadcastInterval),
+      initialDefaultDownloadDir(currentDefaultDownloadDir),
+      initialRequireFileAccept(currentRequireFileAccept)
 {
     setupUI();
     setWindowTitle(tr("Application Settings"));
@@ -60,14 +65,16 @@ SettingsDialog::SettingsDialog(const QString &currentUserName,
     onOutgoingPortSettingsChanged();
 
     udpDiscoveryCheckBox->setChecked(currentUdpDiscoveryEnabled);
-    udpDiscoveryPortSpinBox->setValue(currentUdpDiscoveryPort); // Added
+    udpDiscoveryPortSpinBox->setValue(currentUdpDiscoveryPort);
     manualBroadcastButton->setEnabled(currentUdpDiscoveryEnabled);
 
-    enableContinuousUdpBroadcastCheckBox->setChecked(currentEnableContinuousUdpBroadcast); // Added
-    udpBroadcastIntervalSpinBox->setValue(currentUdpBroadcastInterval > 0 ? currentUdpBroadcastInterval : 5); // Added
-    onUdpContinuousBroadcastChanged(currentEnableContinuousUdpBroadcast); // Added
+    enableContinuousUdpBroadcastCheckBox->setChecked(currentEnableContinuousUdpBroadcast);
+    udpBroadcastIntervalSpinBox->setValue(currentUdpBroadcastInterval > 0 ? currentUdpBroadcastInterval : 5);
+    onUdpContinuousBroadcastChanged(currentEnableContinuousUdpBroadcast);
 
-    // Connect signals after UI setup and initial value setting
+    downloadDirEdit->setText(currentDefaultDownloadDir);
+    requireFileAcceptCheckBox->setChecked(currentRequireFileAccept);
+
     connect(enableListeningCheckBox, &QCheckBox::toggled, this, &SettingsDialog::onEnableListeningChanged);
     connect(retryListenButton, &QPushButton::clicked, this, &SettingsDialog::onRetryListenNowClicked);
     connect(specifyOutgoingPortCheckBox, &QCheckBox::toggled, this, &SettingsDialog::onOutgoingPortSettingsChanged);
@@ -88,8 +95,10 @@ SettingsDialog::~SettingsDialog()
 void SettingsDialog::updateFields(const QString &userName, const QString &uuid,
                                   quint16 listenPort, bool enableListening,
                                   quint16 outgoingPort, bool useSpecificOutgoing,
-                                  bool enableUdpDiscovery, quint16 udpDiscoveryPort, // Added
-                                  bool enableContinuousUdpBroadcast, int udpBroadcastInterval) // Added
+                                  bool enableUdpDiscovery, quint16 udpDiscoveryPort,
+                                  bool enableContinuousUdpBroadcast, int udpBroadcastInterval,
+                                  const QString &defaultDownloadDir,
+                                  bool requireFileAccept)
 {
     userNameEdit->setText(userName);
     userUuidEdit->setText(uuid);
@@ -112,14 +121,16 @@ void SettingsDialog::updateFields(const QString &userName, const QString &uuid,
     onOutgoingPortSettingsChanged();
 
     udpDiscoveryCheckBox->setChecked(enableUdpDiscovery);
-    udpDiscoveryPortSpinBox->setValue(udpDiscoveryPort); // Added
+    udpDiscoveryPortSpinBox->setValue(udpDiscoveryPort);
     manualBroadcastButton->setEnabled(enableUdpDiscovery);
 
-    enableContinuousUdpBroadcastCheckBox->setChecked(enableContinuousUdpBroadcast); // Added
-    udpBroadcastIntervalSpinBox->setValue(udpBroadcastInterval > 0 ? udpBroadcastInterval : 5); // Added
-    onUdpContinuousBroadcastChanged(enableContinuousUdpBroadcast); // Added
+    enableContinuousUdpBroadcastCheckBox->setChecked(enableContinuousUdpBroadcast);
+    udpBroadcastIntervalSpinBox->setValue(udpBroadcastInterval > 0 ? udpBroadcastInterval : 5);
+    onUdpContinuousBroadcastChanged(enableContinuousUdpBroadcast);
 
-    // Update initial values as well, so "Cancel" reverts to these if dialog is re-shown without saving
+    downloadDirEdit->setText(defaultDownloadDir);
+    requireFileAcceptCheckBox->setChecked(requireFileAccept);
+
     initialUserName = userName;
     initialUserUuid = uuid;
     initialListenPort = listenPort;
@@ -127,9 +138,11 @@ void SettingsDialog::updateFields(const QString &userName, const QString &uuid,
     initialOutgoingPort = outgoingPort;
     initialUseSpecificOutgoing = useSpecificOutgoing;
     initialUdpDiscoveryEnabled = enableUdpDiscovery;
-    initialUdpDiscoveryPort = udpDiscoveryPort; // Added
-    initialContinuousUdpBroadcastEnabled = enableContinuousUdpBroadcast; // 修正变量名
-    initialUdpBroadcastInterval = udpBroadcastInterval; // Added
+    initialUdpDiscoveryPort = udpDiscoveryPort;
+    initialContinuousUdpBroadcastEnabled = enableContinuousUdpBroadcast;
+    initialUdpBroadcastInterval = udpBroadcastInterval;
+    initialDefaultDownloadDir = defaultDownloadDir;
+    initialRequireFileAccept = requireFileAccept;
 }
 
 void SettingsDialog::setupUI()
@@ -152,11 +165,11 @@ void SettingsDialog::setupUI()
 
     // --- Tab 2: TCP Settings ---
     QWidget *tcpTab = new QWidget(this);
-    QVBoxLayout *tcpTabLayout = new QVBoxLayout(tcpTab); // Main layout for this tab
+    QVBoxLayout *tcpTabLayout = new QVBoxLayout(tcpTab);
 
     // GroupBox for Listening Settings
     QGroupBox *listenGroup = new QGroupBox(tr("TCP Listening Settings"), this);
-    QFormLayout *listenPortFormLayout = new QFormLayout(); // Form layout for listening settings
+    QFormLayout *listenPortFormLayout = new QFormLayout();
 
     enableListeningCheckBox = new QCheckBox(tr("Enable Network Listening"), this);
 
@@ -173,7 +186,7 @@ void SettingsDialog::setupUI()
 
     // GroupBox for Outgoing Connections
     QGroupBox *outgoingGroup = new QGroupBox(tr("TCP Outgoing Connections"), this);
-    QVBoxLayout *outgoingPortSettingsLayout = new QVBoxLayout(); // VBox for outgoing settings
+    QVBoxLayout *outgoingPortSettingsLayout = new QVBoxLayout();
     specifyOutgoingPortCheckBox = new QCheckBox(tr("Specify source port for outgoing connections"), this);
     outgoingPortSpinBox = new QSpinBox(this);
     outgoingPortSpinBox->setRange(0, 65535);
@@ -216,6 +229,25 @@ void SettingsDialog::setupUI()
     udpDiscoveryFormLayout->addRow(manualBroadcastButton);
     tabWidget->addTab(udpDiscoveryTab, tr("UDP"));
 
+    QWidget *fileTab = new QWidget(this);
+    QFormLayout *fileFormLayout = new QFormLayout(fileTab);
+
+    downloadDirEdit = new QLineEdit(this);
+    downloadDirEdit->setPlaceholderText(tr("Default download directory"));
+    selectDownloadDirButton = new QPushButton(tr("Browse..."), this);
+    connect(selectDownloadDirButton, &QPushButton::clicked, this, &SettingsDialog::onSelectDownloadDirClicked);
+
+    QHBoxLayout *downloadDirLayout = new QHBoxLayout();
+    downloadDirLayout->addWidget(downloadDirEdit, 1);
+    downloadDirLayout->addWidget(selectDownloadDirButton);
+
+    requireFileAcceptCheckBox = new QCheckBox(tr("Require confirmation before receiving files"), this);
+
+    fileFormLayout->addRow(tr("Default Download Directory:"), downloadDirLayout);
+    fileFormLayout->addRow(requireFileAcceptCheckBox);
+
+    tabWidget->addTab(fileTab, tr("File Transfer"));
+
     mainLayout->addWidget(tabWidget);
 
     // Buttons
@@ -243,14 +275,14 @@ void SettingsDialog::onUdpDiscoveryEnableChanged(bool checked)
 {
     manualBroadcastButton->setEnabled(checked);
     udpDiscoveryPortSpinBox->setEnabled(checked);
-    enableContinuousUdpBroadcastCheckBox->setEnabled(checked); // Added
+    enableContinuousUdpBroadcastCheckBox->setEnabled(checked);
     if (!checked) {
         enableContinuousUdpBroadcastCheckBox->setChecked(false);
     }
-    onUdpContinuousBroadcastChanged(enableContinuousUdpBroadcastCheckBox->isChecked() && checked); // Added
+    onUdpContinuousBroadcastChanged(enableContinuousUdpBroadcastCheckBox->isChecked() && checked);
 }
 
-void SettingsDialog::onUdpContinuousBroadcastChanged(bool checked) // Added
+void SettingsDialog::onUdpContinuousBroadcastChanged(bool checked)
 {
     udpBroadcastIntervalSpinBox->setEnabled(checked && udpDiscoveryCheckBox->isChecked());
 }
@@ -270,6 +302,14 @@ void SettingsDialog::onOutgoingPortSettingsChanged()
     outgoingPortSpinBox->setEnabled(specifyOutgoingPortCheckBox->isChecked());
 }
 
+void SettingsDialog::onSelectDownloadDirClicked()
+{
+    QString dir = QFileDialog::getExistingDirectory(this, tr("Select Download Directory"), downloadDirEdit->text());
+    if (!dir.isEmpty()) {
+        downloadDirEdit->setText(dir);
+    }
+}
+
 void SettingsDialog::onSaveButtonClicked()
 {
     QString newUserName = userNameEdit->text().trimmed();
@@ -278,9 +318,11 @@ void SettingsDialog::onSaveButtonClicked()
     quint16 newOutgoingPort = static_cast<quint16>(outgoingPortSpinBox->value());
     bool newUseSpecificOutgoing = specifyOutgoingPortCheckBox->isChecked();
     bool newEnableUdpDiscovery = udpDiscoveryCheckBox->isChecked();
-    quint16 newUdpDiscoveryPort = static_cast<quint16>(udpDiscoveryPortSpinBox->value()); // Added
-    bool newEnableContinuousUdpBroadcast = enableContinuousUdpBroadcastCheckBox->isChecked(); // Added
-    int newUdpBroadcastInterval = udpBroadcastIntervalSpinBox->value(); // Added
+    quint16 newUdpDiscoveryPort = static_cast<quint16>(udpDiscoveryPortSpinBox->value());
+    bool newEnableContinuousUdpBroadcast = enableContinuousUdpBroadcastCheckBox->isChecked();
+    int newUdpBroadcastInterval = udpBroadcastIntervalSpinBox->value();
+    QString newDefaultDownloadDir = downloadDirEdit->text().trimmed();
+    bool newRequireFileAccept = requireFileAcceptCheckBox->isChecked();
 
     if (newUserName.isEmpty()) {
         QMessageBox::warning(this, tr("Input Error"), tr("User name cannot be empty."));
@@ -310,15 +352,18 @@ void SettingsDialog::onSaveButtonClicked()
     initialOutgoingPort = newOutgoingPort;
     initialUseSpecificOutgoing = newUseSpecificOutgoing;
     initialUdpDiscoveryEnabled = newEnableUdpDiscovery;
-    initialUdpDiscoveryPort = newUdpDiscoveryPort; // Added
-    initialContinuousUdpBroadcastEnabled = newEnableContinuousUdpBroadcast; // 修正变量名
-    initialUdpBroadcastInterval = newUdpBroadcastInterval; // Added
+    initialUdpDiscoveryPort = newUdpDiscoveryPort;
+    initialContinuousUdpBroadcastEnabled = newEnableContinuousUdpBroadcast;
+    initialUdpBroadcastInterval = newUdpBroadcastInterval;
+    initialDefaultDownloadDir = newDefaultDownloadDir;
+    initialRequireFileAccept = newRequireFileAccept;
 
     emit settingsApplied(newUserName, newListenPort, newEnableListening,
                          newOutgoingPort, newUseSpecificOutgoing,
-                         newEnableUdpDiscovery, newUdpDiscoveryPort, // Added
-                         newEnableContinuousUdpBroadcast, newUdpBroadcastInterval); // Added
-    accept(); // Close the dialog
+                         newEnableUdpDiscovery, newUdpDiscoveryPort,
+                         newEnableContinuousUdpBroadcast, newUdpBroadcastInterval,
+                         newDefaultDownloadDir, newRequireFileAccept);
+    accept();
 }
 
 QString SettingsDialog::getUserName() const
@@ -357,17 +402,27 @@ bool SettingsDialog::isUdpDiscoveryEnabled() const
     return udpDiscoveryCheckBox->isChecked();
 }
 
-quint16 SettingsDialog::getUdpDiscoveryPort() const // Added
+quint16 SettingsDialog::getUdpDiscoveryPort() const
 {
     return static_cast<quint16>(udpDiscoveryPortSpinBox->value());
 }
 
-bool SettingsDialog::isContinuousUdpBroadcastEnabled() const // Added
+bool SettingsDialog::isContinuousUdpBroadcastEnabled() const
 {
     return enableContinuousUdpBroadcastCheckBox->isChecked();
 }
 
-int SettingsDialog::getUdpBroadcastInterval() const // Added
+int SettingsDialog::getUdpBroadcastInterval() const
 {
     return udpBroadcastIntervalSpinBox->value();
+}
+
+QString SettingsDialog::getDefaultDownloadDir() const
+{
+    return downloadDirEdit->text().trimmed();
+}
+
+bool SettingsDialog::isRequireFileAccept() const
+{
+    return requireFileAcceptCheckBox->isChecked();
 }

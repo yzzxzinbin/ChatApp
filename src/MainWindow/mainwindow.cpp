@@ -53,7 +53,9 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
       udpBroadcastIntervalSeconds(5),
       localOutgoingPort(0),
       useSpecificOutgoingPort(false),
-      fileTransferManager(nullptr)
+      fileTransferManager(nullptr),
+      defaultDownloadDir(QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)),
+      requireFileAccept(true)
 {
     QApplication::setEffectEnabled(Qt::UI_AnimateCombo, false);
     loadCurrentUserIdentity();
@@ -110,6 +112,14 @@ MainWindow::MainWindow(const QString &currentUserId, QWidget *parent)
         connect(fileTransferManager, &FileTransferManager::fileTransferProgress, this, &MainWindow::updateFileTransferProgress);
         connect(fileTransferManager, &FileTransferManager::fileTransferFinished, this, &MainWindow::handleFileTransferFinished);
     }
+
+    // Load user settings
+    QSettings settings;
+    QString userSettingsGroup = "UserAccounts/" + m_currentUserIdStr + "/Settings";
+    settings.beginGroup(userSettingsGroup);
+    defaultDownloadDir = settings.value("DefaultDownloadDir", QStandardPaths::writableLocation(QStandardPaths::DownloadLocation)).toString();
+    requireFileAccept = settings.value("RequireFileAccept", true).toBool();
+    settings.endGroup();
 
     loadCurrentUserContacts(); // 加载联系人
 
@@ -237,7 +247,8 @@ void MainWindow::handleSettingsApplied(const QString &userName,
                                        bool enableListening,
                                        quint16 outgoingPort, bool useSpecificOutgoingPortVal,
                                        bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                                       bool enableContinuousUdpBroadcast, int udpBroadcastInterval)
+                                       bool enableContinuousUdpBroadcast, int udpBroadcastInterval,
+                                       const QString &newDefaultDownloadDir, bool newRequireFileAccept)
 {
     if (m_currentUserIdStr.isEmpty())
         return;
@@ -308,6 +319,20 @@ void MainWindow::handleSettingsApplied(const QString &userName,
             networkManager->setOutgoingConnectionPreferences(localOutgoingPort, useSpecificOutgoingPort);
         }
     }
+
+    if (defaultDownloadDir != newDefaultDownloadDir)
+    {
+        defaultDownloadDir = newDefaultDownloadDir;
+        settings.setValue("DefaultDownloadDir", defaultDownloadDir);
+        settingsChanged = true;
+    }
+    if (requireFileAccept != newRequireFileAccept)
+    {
+        requireFileAccept = newRequireFileAccept;
+        settings.setValue("RequireFileAccept", requireFileAccept);
+        settingsChanged = true;
+    }
+
     settings.endGroup();
 
     if (settingsChanged)
@@ -351,6 +376,7 @@ void MainWindow::onSettingsButtonClicked()
                                             localOutgoingPort, useSpecificOutgoingPort,
                                             udpDiscoveryEnabled, localUdpDiscoveryPort,
                                             udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds,
+                                            defaultDownloadDir, requireFileAccept,
                                             this);
         connect(settingsDialog, &SettingsDialog::settingsApplied, this, &MainWindow::handleSettingsApplied);
         connect(settingsDialog, &SettingsDialog::retryListenNowRequested, this, &MainWindow::handleRetryListenNowRequested);
@@ -362,7 +388,8 @@ void MainWindow::onSettingsButtonClicked()
                                      localListenPort, autoNetworkListeningEnabled,
                                      localOutgoingPort, useSpecificOutgoingPort,
                                      udpDiscoveryEnabled, localUdpDiscoveryPort,
-                                     udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
+                                     udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds,
+                                     defaultDownloadDir, requireFileAccept);
     }
     settingsDialog->exec();
 }
@@ -1026,6 +1053,21 @@ void MainWindow::handleIncomingFileOffer(const QString &transferID, const QStrin
             peerName = contactListWidget->item(i)->text();
             break;
         }
+    }
+
+    if (!requireFileAccept)
+    {
+        // 自动保存到默认目录
+        QString savePath = defaultDownloadDir + "/" + fileName;
+        if (fileTransferManager)
+        {
+            fileTransferManager->acceptFileOffer(transferID, savePath);
+            updateNetworkStatus(tr("Auto-accepted file offer for %1 from %2. Saving to %3.")
+                                    .arg(fileName)
+                                    .arg(peerName)
+                                    .arg(QFileInfo(savePath).fileName()));
+        }
+        return;
     }
 
     QMessageBox::StandardButton reply;

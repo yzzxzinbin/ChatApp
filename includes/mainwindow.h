@@ -78,7 +78,8 @@ private slots: // 将这些声明为 private slots
                                bool enableListening,
                                quint16 outgoingPort, bool useSpecificOutgoingPortVal,
                                bool enableUdpDiscovery, quint16 udpDiscoveryPort,
-                               bool enableContinuousUdpBroadcast, int udpBroadcastInterval);
+                               bool enableContinuousUdpBroadcast, int udpBroadcastInterval,
+                               const QString &newDefaultDownloadDir, bool newRequireFileAccept);
     void handleRetryListenNowRequested(); // 新增槽
     void handleManualUdpBroadcastRequested(); // 新增槽
 
@@ -163,6 +164,10 @@ private:
     FileTransferManager *fileTransferManager;    // <-- Add FileTransferManager member
 
     QString m_currentUserIdStr; // 新增：存储当前登录的用户ID
+
+    // 文件传输相关设置
+    QString defaultDownloadDir;
+    bool requireFileAccept;
 
     void setupUI();
     // 新增：联系人持久化和重连方法
