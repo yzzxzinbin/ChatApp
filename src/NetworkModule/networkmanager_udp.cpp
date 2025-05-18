@@ -551,9 +551,3 @@ void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port, bool
         emit serverStatusMessage(status);
     }
 }
-// 重载的非完全参数的setUdpDiscoveryPreferences,用于兼容旧版本
-void NetworkManager::setUdpDiscoveryPreferences(bool enabled, quint16 port)
-{
-    // Call the new method with all parameters, keeping current continuous broadcast and interval settings
-    setUdpDiscoveryPreferences(enabled, port, udpContinuousBroadcastEnabled, udpBroadcastIntervalSeconds);
-}

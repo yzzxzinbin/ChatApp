@@ -29,6 +29,7 @@ FileReadResult FileIOManager::performRead(QString transferID, qint64 chunkID, QS
     result.transferID = transferID;
     result.chunkID = chunkID;
     result.success = false;
+    result.originalSize = 0;
 
     if (!file.open(QIODevice::ReadOnly)) {
         result.errorString = QString("Failed to open file %1: %2").arg(filePath).arg(file.errorString());
@@ -41,20 +42,12 @@ FileReadResult FileIOManager::performRead(QString transferID, qint64 chunkID, QS
         return result;
     }
 
-    result.data = file.read(size);
-    if (result.data.isNull() && file.error() != QFileDevice::NoError) { // read() returns null on error
+    QByteArray rawData = file.read(size);
+    if (rawData.isNull() && file.error() != QFileDevice::NoError) { // read() returns null on error
         result.errorString = QString("Failed to read from file %1: %2").arg(filePath).arg(file.errorString());
-    } else if (result.data.size() != size && !file.atEnd() && result.data.size() < size) {
-        // This case (reading less than requested but not at EOF and no error) is unusual for local files
-        // but could happen. For simplicity, we might treat it as an error or a partial success.
-        // For now, if not atEnd and size mismatch, consider it an issue.
-        // If atEnd, it's normal for the last chunk.
-        // The check `chunkData.isEmpty() && !session.file->atEnd()` in FTM was for this.
-        // Here, if data.isNull() it's an error. If data.size() < size and atEnd(), it's fine.
-        // If data.size() < size and !atEnd(), it's potentially problematic.
-        // For now, we assume read() behaves as expected or returns null on error.
-        result.success = true; // Assume success if no direct error from read()
     } else {
+        result.originalSize = rawData.size();
+        result.dataB64 = QString::fromUtf8(rawData.toBase64());
         result.success = true;
     }
 
@@ -62,7 +55,7 @@ FileReadResult FileIOManager::performRead(QString transferID, qint64 chunkID, QS
     return result;
 }
 
-FileWriteResult FileIOManager::performWrite(QString transferID, qint64 chunkID, QString filePath, qint64 offset, QByteArray data)
+FileWriteResult FileIOManager::performWrite(QString transferID, qint64 chunkID, QString filePath, qint64 offset, QString dataB64, qint64 originalChunkSize)
 {
     // qDebug() << "FileIOManager::performWrite on thread:" << QThread::currentThreadId();
     QFile file(filePath);
@@ -70,11 +63,16 @@ FileWriteResult FileIOManager::performWrite(QString transferID, qint64 chunkID, 
     result.transferID = transferID;
     result.chunkID = chunkID;
     result.success = false;
+    result.bytesWritten = 0;
 
-    // For writing, we typically want to ensure the file grows or we write at a specific location.
-    // If using offset, QIODevice::ReadWrite might be more appropriate to allow seeking then writing.
-    // If always appending sequentially based on previous writes, QIODevice::Append is fine.
-    // Given our receiver logic writes contiguous chunks, and `offset` is the expected start of this chunk:
+    QByteArray decodedData = QByteArray::fromBase64(dataB64.toUtf8());
+
+    if (decodedData.size() != originalChunkSize) {
+        result.errorString = QString("Decoded data size mismatch for chunk %1. Expected %2, got %3.")
+                                 .arg(chunkID).arg(originalChunkSize).arg(decodedData.size());
+        return result;
+    }
+
     if (!file.open(QIODevice::ReadWrite)) { // Use ReadWrite to allow seek
         result.errorString = QString("Failed to open file %1 for writing: %2").arg(filePath).arg(file.errorString());
         return result;
@@ -86,12 +84,13 @@ FileWriteResult FileIOManager::performWrite(QString transferID, qint64 chunkID, 
         return result;
     }
 
-    result.bytesWritten = file.write(data);
-    if (result.bytesWritten != data.size()) {
+    qint64 bytesWrittenToFile = file.write(decodedData);
+    if (bytesWrittenToFile != decodedData.size()) {
         result.errorString = QString("Failed to write complete data to file %1 (wrote %2 of %3 bytes): %4")
-                                 .arg(filePath).arg(result.bytesWritten).arg(data.size()).arg(file.errorString());
+                                 .arg(filePath).arg(bytesWrittenToFile).arg(decodedData.size()).arg(file.errorString());
         // result.success remains false
     } else {
+        result.bytesWritten = bytesWrittenToFile;
         result.success = true;
     }
 
@@ -105,7 +104,7 @@ void FileIOManager::requestReadFileChunk(const QString& transferID, qint64 chunk
     QFutureWatcher<FileReadResult> *watcher = new QFutureWatcher<FileReadResult>(this);
     connect(watcher, &QFutureWatcher<FileReadResult>::finished, this, [this, watcher]() {
         FileReadResult result = watcher->result();
-        emit chunkReadCompleted(result.transferID, result.chunkID, result.data, result.success, result.errorString);
+        emit chunkReadCompleted(result.transferID, result.chunkID, result.dataB64, result.originalSize, result.success, result.errorString);
         watcher->deleteLater(); // Clean up the watcher
     });
 
@@ -113,7 +112,7 @@ void FileIOManager::requestReadFileChunk(const QString& transferID, qint64 chunk
     watcher->setFuture(future);
 }
 
-void FileIOManager::requestWriteFileChunk(const QString& transferID, qint64 chunkID, const QString& filePath, qint64 offset, const QByteArray& data)
+void FileIOManager::requestWriteFileChunk(const QString& transferID, qint64 chunkID, const QString& filePath, qint64 offset, const QString& dataB64, qint64 originalChunkSize)
 {
     QFutureWatcher<FileWriteResult> *watcher = new QFutureWatcher<FileWriteResult>(this);
     connect(watcher, &QFutureWatcher<FileWriteResult>::finished, this, [this, watcher]() {
@@ -122,6 +121,6 @@ void FileIOManager::requestWriteFileChunk(const QString& transferID, qint64 chun
         watcher->deleteLater();
     });
 
-    QFuture<FileWriteResult> future = QtConcurrent::run(&FileIOManager::performWrite, transferID, chunkID, filePath, offset, data);
+    QFuture<FileWriteResult> future = QtConcurrent::run(&FileIOManager::performWrite, transferID, chunkID, filePath, offset, dataB64, originalChunkSize);
     watcher->setFuture(future);
 }

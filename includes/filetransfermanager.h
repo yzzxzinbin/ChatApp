@@ -7,16 +7,17 @@
 #include <QTimer>
 #include <QSet> // For receivedOutOfOrderChunks keys
 #include <QElapsedTimer> // Include QElapsedTimer
+#include <QPair> // Required for QPair
 #include "fileiomanager.h" // <-- Include FileIOManager
 
 class NetworkManager; // Forward declaration
 
 // Sliding Window Configuration
-const int DEFAULT_SEND_WINDOW_SIZE = 24; // Send up to 5 chunks before waiting for ACK for the first one
-const int DEFAULT_RECEIVE_WINDOW_SIZE = 32; // Receiver can buffer up to 10 out-of-order chunks
+const int DEFAULT_SEND_WINDOW_SIZE = 32; // Send up to 5 chunks before waiting for ACK for the first one
+const int DEFAULT_RECEIVE_WINDOW_SIZE = 48; // Receiver can buffer up to 10 out-of-order chunks
 const int FT_CHUNK_RETRANSMISSION_TIMEOUT_MS = 10000; // Timeout for retransmitting the base of the send window
-const int MAX_CONCURRENT_READS_PER_TRANSFER = 8;  // Example limit
-const int MAX_CONCURRENT_WRITES_PER_TRANSFER = 12; // Example limit
+const int MAX_CONCURRENT_READS_PER_TRANSFER = 6;  // Example limit
+const int MAX_CONCURRENT_WRITES_PER_TRANSFER = 8; // Example limit
 
 struct FileTransferSession {
     QString transferID;
@@ -36,7 +37,7 @@ struct FileTransferSession {
 
     // Receiver specific for Sliding Window
     qint64 highestContiguousChunkReceived; // Highest chunk ID received and written in order
-    QMap<qint64, QByteArray> receivedOutOfOrderChunks; // Buffer for out-of-order chunks
+    QMap<qint64, QPair<QString, qint64>> receivedOutOfOrderChunks; // Buffer for out-of-order chunks: chunkID -> {dataB64, originalSize}
 
     FileTransferSession() : 
         fileSize(0), isSender(false), state(Idle), bytesTransferred(0), 
@@ -90,7 +91,8 @@ private slots:
     void handleChunkRetransmissionTimeout(const QString& transferID); // Renamed from handleTransferTimeout
 
     // New slots for FileIOManager signals
-    void handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QByteArray& data, bool success, const QString& error);
+    // 修改：data参数类型变为const QString& dataB64，并增加originalSize参数
+    void handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QString& dataB64, qint64 originalSize, bool success, const QString& error);
     void handleChunkWritten(const QString& transferID, qint64 chunkID, qint64 bytesWritten, bool success, const QString& error);
 
 private:
@@ -112,7 +114,8 @@ private:
     void sendFileOffer(const QString& peerUuid, const QString& transferID, const QString& fileName, qint64 fileSize);
     void sendAcceptMessage(const QString& peerUuid, const QString& transferID, const QString& savePathHint); // Modified
     void sendRejectMessage(const QString& peerUuid, const QString& transferID, const QString& reason);
-    void sendChunkData(const QString& transferID, qint64 chunkID, const QByteArray& chunkData); // New helper
+    // 修改：chunkData参数类型变为const QString& dataB64，并增加originalChunkSize参数
+    void sendChunkData(const QString& transferID, qint64 chunkID, const QString& dataB64, qint64 originalChunkSize);
     void sendDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID); // ackedChunkID is the highest contiguous received
     void sendEOF(const QString& transferID);
     void sendEOFAck(const QString& peerUuid, const QString& transferID);
@@ -121,7 +124,8 @@ private:
     void handleFileOffer(const QString& peerUuid, const QString& transferID, const QString& fileName, qint64 fileSize);
     void handleFileAccept(const QString& peerUuid, const QString& transferID, const QString& savePathHint); // Modified
     void handleFileReject(const QString& peerUuid, const QString& transferID, const QString& reason);
-    void handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 chunkSize, const QByteArray& data);
+    // 修改：data参数类型变为const QString& dataB64, chunkSize变为originalChunkSize
+    void handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 originalChunkSize, const QString& dataB64);
     void handleDataAck(const QString& peerUuid, const QString& transferID, qint64 ackedChunkID); // ackedChunkID is the highest contiguous received by peer
     void handleEOF(const QString& peerUuid, const QString& transferID, qint64 totalChunks, const QString& finalChecksum);
     void handleEOFAck(const QString& peerUuid, const QString& transferID);

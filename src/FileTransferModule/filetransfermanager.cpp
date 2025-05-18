@@ -21,7 +21,7 @@ QString FileTransferManager::extractMessageAttribute(const QString& message, con
 
 // 集中ACK参数
 const int ACK_BATCH_SIZE = 4;      // 每收到4个新chunk就ACK一次
-const int ACK_DELAY_MS = 100;      // 或每100ms至少ACK一次
+const int ACK_DELAY_MS = 10;      // 或每100ms至少ACK一次
 
 FileTransferManager::FileTransferManager(NetworkManager* networkManager, FileIOManager* fileIOManager, const QString& localUserUuid, QObject *parent)
     : QObject(parent), m_networkManager(networkManager), m_fileIOManager(fileIOManager), m_localUserUuid(localUserUuid)
@@ -34,6 +34,7 @@ FileTransferManager::FileTransferManager(NetworkManager* networkManager, FileIOM
     }
 
     // Connect signals from FileIOManager
+    // 更新以匹配新的信号签名
     connect(m_fileIOManager, &FileIOManager::chunkReadCompleted, this, &FileTransferManager::handleChunkReadForSending);
     connect(m_fileIOManager, &FileIOManager::chunkWrittenCompleted, this, &FileTransferManager::handleChunkWritten);
 }
@@ -106,6 +107,7 @@ void FileTransferManager::sendFileOffer(const QString& peerUuid, const QString& 
 
 void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, const QString& message)
 {
+    
     qDebug() << "FileTransferManager::handleIncomingFileMessage from" << peerUuid << "Type:" << (message.left(20));
 
     if (message.startsWith("<FT_OFFER")) {
@@ -142,16 +144,16 @@ void FileTransferManager::handleIncomingFileMessage(const QString& peerUuid, con
     } else if (message.startsWith("<FT_CHUNK")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
         qint64 chunkID = extractMessageAttribute(message, "ChunkID").toLongLong();
-        qint64 chunkSize = extractMessageAttribute(message, "Size").toLongLong();
+        qint64 originalChunkSize = extractMessageAttribute(message, "Size").toLongLong(); // This is the original binary size
         QString dataB64 = extractMessageAttribute(message, "Data");
-        QByteArray data = QByteArray::fromBase64(dataB64.toUtf8());
+        // QByteArray data = QByteArray::fromBase64(dataB64.toUtf8()); // 解码移至FileIOManager
 
-        if (transferID.isEmpty() || dataB64.isEmpty() || data.size() != chunkSize) {
-            qWarning() << "FileTransferManager: Invalid FT_CHUNK received:" << message;
-            sendError(peerUuid, transferID, "CHUNK_INVALID", "Received invalid chunk data.");
+        if (transferID.isEmpty() || dataB64.isEmpty()) { // 移除了 data.size() != chunkSize 的检查
+            qWarning() << "FileTransferManager: Invalid FT_CHUNK received (empty ID or dataB64):" << message;
+            sendError(peerUuid, transferID, "CHUNK_INVALID", "Received invalid chunk data (empty ID or data).");
             return;
         }
-        handleFileChunk(peerUuid, transferID, chunkID, chunkSize, data);
+        handleFileChunk(peerUuid, transferID, chunkID, originalChunkSize, dataB64); // 传递QString dataB64 和 originalChunkSize
     } else if (message.startsWith("<FT_ACK_DATA")) {
         QString transferID = extractMessageAttribute(message, "TransferID");
         qint64 ackedChunkID = extractMessageAttribute(message, "ChunkID").toLongLong();
@@ -389,9 +391,9 @@ void FileTransferManager::processSendQueue(const QString& transferID) {
             << "outstandingReads=" << m_outstandingReadRequests.value(transferID, 0);
 }
 
-void FileTransferManager::handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QByteArray& data, bool success, const QString& error) {
+void FileTransferManager::handleChunkReadForSending(const QString& transferID, qint64 chunkID, const QString& dataB64, qint64 originalSize, bool success, const QString& error) {
     if (!m_sessions.contains(transferID)) {
-        m_outstandingReadRequests[transferID]--;
+        if (m_outstandingReadRequests.contains(transferID)) m_outstandingReadRequests[transferID]--;
         return;
     }
     m_outstandingReadRequests[transferID]--;
@@ -415,7 +417,7 @@ void FileTransferManager::handleChunkReadForSending(const QString& transferID, q
         return;
     }
 
-    sendChunkData(transferID, chunkID, data);
+    sendChunkData(transferID, chunkID, dataB64, originalSize); // 传递 dataB64 和 originalSize
 
     if (chunkID == session.sendWindowBase) {
         startRetransmissionTimer(transferID);
@@ -424,20 +426,27 @@ void FileTransferManager::handleChunkReadForSending(const QString& transferID, q
     processSendQueue(transferID);
 }
 
-void FileTransferManager::sendChunkData(const QString& transferID, qint64 chunkID, const QByteArray& chunkData) {
+void FileTransferManager::sendChunkData(const QString& transferID, qint64 chunkID, const QString& dataB64, qint64 originalChunkSize) {
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
 
-    QString dataB64 = QString::fromUtf8(chunkData.toBase64());
+    // dataB64 已经是 QString 格式的Base64编码数据
+    // originalChunkSize 是原始二进制数据的大小
     QString chunkMessage = FT_MSG_CHUNK_FORMAT.arg(transferID)
                                            .arg(chunkID)
-                                           .arg(chunkData.size())
-                                           .arg(dataB64);
+                                           .arg(originalChunkSize) // 使用原始大小
+                                           .arg(dataB64);          // 使用Base64编码的QString
     m_networkManager->sendMessage(session.peerUuid, chunkMessage);
-    qDebug() << "FileTransferManager: Sent chunk" << chunkID << "for" << transferID << "Size:" << chunkData.size();
+    qDebug() << "FileTransferManager: Sent chunk" << chunkID << "for" << transferID << "OriginalSize:" << originalChunkSize;
 }
 
-void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 chunkSize, const QByteArray& data) {
+void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString& transferID, qint64 chunkID, qint64 originalChunkSize, const QString& dataB64) {
+    // 在此处立即记录接收到块的信息
+    qInfo() << "[FTM] Received chunk on network thread: " << " <IMPORTANT> "
+            << "ChunkID=" << chunkID 
+            << "OriginalSize=" << originalChunkSize 
+            << "FromPeer=" << peerUuid;
+
     if (!m_sessions.contains(transferID) || !m_fileIOManager) {
         qWarning() << "FileTransferManager::handleFileChunk: Unknown TransferID" << transferID << "or no FileIOManager";
         if (m_sessions.contains(transferID)) sendError(peerUuid, transferID, "INVALID_TRANSFER_ID", "Unknown transfer ID or internal error.");
@@ -452,7 +461,7 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
     }
     if (session.state == FileTransferSession::Accepted) session.state = FileTransferSession::Transferring;
 
-    qInfo() << "[FTM] handleFileChunk: transferID=" << transferID << "chunkID=" << chunkID << "size=" << chunkSize
+    qInfo() << "[FTM] handleFileChunk: transferID=" << transferID << "chunkID=" << chunkID << "originalSize=" << originalChunkSize
             << "in-order=" << (chunkID == session.highestContiguousChunkReceived + 1)
             << "outstandingWrites=" << m_outstandingWriteRequests.value(transferID, 0)
             << "bufferedChunks=" << session.receivedOutOfOrderChunks.size();
@@ -470,13 +479,13 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
         if (m_outstandingWriteRequests.value(transferID, 0) >= MAX_CONCURRENT_WRITES_PER_TRANSFER) {
             qDebug() << "FileTransferManager: Max concurrent writes reached for" << transferID << ". Buffering chunk" << chunkID;
             if (!session.receivedOutOfOrderChunks.contains(chunkID)) {
-                 session.receivedOutOfOrderChunks.insert(chunkID, data);
+                 session.receivedOutOfOrderChunks.insert(chunkID, qMakePair(dataB64, originalChunkSize)); // 存储 QPair
             }
             sendDataAck(peerUuid, transferID, session.highestContiguousChunkReceived);
         } else {
             qint64 expectedOffset = session.bytesTransferred;
             qDebug() << "FileTransferManager: Requesting write for chunk" << chunkID << "at offset" << expectedOffset;
-            m_fileIOManager->requestWriteFileChunk(transferID, chunkID, session.localFilePath, expectedOffset, data);
+            m_fileIOManager->requestWriteFileChunk(transferID, chunkID, session.localFilePath, expectedOffset, dataB64, originalChunkSize); // 传递 dataB64 和 originalChunkSize
             m_outstandingWriteRequests[transferID]++;
         }
 
@@ -506,7 +515,7 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
         }
     } else {
         if (!session.receivedOutOfOrderChunks.contains(chunkID)) {
-            session.receivedOutOfOrderChunks.insert(chunkID, data);
+            session.receivedOutOfOrderChunks.insert(chunkID, qMakePair(dataB64, originalChunkSize)); // 存储 QPair
             qDebug() << "FileTransferManager: Buffered out-of-order chunk" << chunkID << "for" << transferID;
         } else {
             qDebug() << "FileTransferManager: Received duplicate out-of-order chunk" << chunkID << "for" << transferID;
@@ -568,11 +577,13 @@ void FileTransferManager::processBufferedChunks(const QString& transferID) {
     if (session.receivedOutOfOrderChunks.contains(nextExpectedChunk) &&
         m_outstandingWriteRequests.value(transferID, 0) < MAX_CONCURRENT_WRITES_PER_TRANSFER) {
 
-        QByteArray data = session.receivedOutOfOrderChunks.take(nextExpectedChunk); 
+        QPair<QString, qint64> chunkInfo = session.receivedOutOfOrderChunks.take(nextExpectedChunk); 
+        QString dataB64 = chunkInfo.first;
+        qint64 originalSize = chunkInfo.second;
         qint64 expectedOffset = session.bytesTransferred; 
 
         qDebug() << "FileTransferManager: Requesting write for buffered chunk" << nextExpectedChunk << "for" << transferID << "at offset" << expectedOffset;
-        m_fileIOManager->requestWriteFileChunk(transferID, nextExpectedChunk, session.localFilePath, expectedOffset, data);
+        m_fileIOManager->requestWriteFileChunk(transferID, nextExpectedChunk, session.localFilePath, expectedOffset, dataB64, originalSize); // 传递 dataB64 和 originalSize
         m_outstandingWriteRequests[transferID]++;
     }
 
