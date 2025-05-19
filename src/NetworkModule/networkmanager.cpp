@@ -998,6 +998,15 @@ void NetworkManager::addEstablishedConnection(QTcpSocket *socket, const QString 
     connect(socket, &QTcpSocket::disconnected, this, &NetworkManager::handleClientSocketDisconnected);
     connect(socket, QOverload<QAbstractSocket::SocketError>::of(&QTcpSocket::errorOccurred), this, &NetworkManager::handleClientSocketError);
 
+    // Set TCP buffer sizes to 8MB
+    const int bufferSize = 8 * 1024 * 1024; // 8MB
+    socket->setSocketOption(QAbstractSocket::ReceiveBufferSizeSocketOption, bufferSize);
+    socket->setSocketOption(QAbstractSocket::SendBufferSizeSocketOption, bufferSize);
+    qDebug() << "NM::addEstablishedConnection: Requested TCP Receive Buffer Size:" << bufferSize << "for peer" << peerUuid;
+    qDebug() << "NM::addEstablishedConnection: Requested TCP Send Buffer Size:" << bufferSize << "for peer" << peerUuid;
+    // You can check the actual size if needed, though it's not directly queryable via QAbstractSocket in a simple way after setting.
+    // OS might cap it. For more detailed checks, platform-specific socket calls would be needed.
+
     connectedSockets.insert(peerUuid, socket);
     socketToUuidMap.insert(socket, peerUuid);
     peerUuidToNameMap.insert(peerUuid, peerName);
