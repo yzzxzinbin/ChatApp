@@ -39,10 +39,16 @@ struct FileTransferSession {
     qint64 highestContiguousChunkReceived; // Highest chunk ID received and written in order
     QMap<qint64, QPair<QString, qint64>> receivedOutOfOrderChunks; // Buffer for out-of-order chunks: chunkID -> {dataB64, originalSize}
 
+    // 新增成员，用于处理延迟的EOF
+    bool eofMessageReceived;                // 标记是否已收到FT_EOF消息
+    qint64 cachedTotalChunksReportedByPeer; // 缓存从EOF消息中获取的对端报告的总块数
+    QString cachedFinalChecksumFromPeer;    // 缓存从EOF消息中获取的最终校验和
+
     FileTransferSession() : 
         fileSize(0), isSender(false), state(Idle), bytesTransferred(0), 
         totalChunks(0), sendWindowBase(0), nextChunkToSendInWindow(0), 
-        retransmissionTimer(nullptr), highestContiguousChunkReceived(-1) {}
+        retransmissionTimer(nullptr), highestContiguousChunkReceived(-1),
+        eofMessageReceived(false), cachedTotalChunksReportedByPeer(0) {} // 初始化新成员
 
     // Helper to clean up timer
     void stopAndClearRetransmissionTimer() {

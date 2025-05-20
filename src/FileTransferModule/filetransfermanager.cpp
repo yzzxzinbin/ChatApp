@@ -526,7 +526,7 @@ void FileTransferManager::handleFileChunk(const QString& peerUuid, const QString
 
 void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 chunkID, qint64 bytesWritten, bool success, const QString& error) {
     if (!m_sessions.contains(transferID)) {
-        m_outstandingWriteRequests[transferID]--;
+        if (m_outstandingWriteRequests.contains(transferID)) m_outstandingWriteRequests[transferID]--; // 确保即使会话消失也递减
         return;
     }
     m_outstandingWriteRequests[transferID]--;
@@ -548,14 +548,37 @@ void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 c
         emit fileTransferProgress(transferID, session.bytesTransferred, session.fileSize);
         qDebug() << "FileTransferManager: Successfully wrote chunk" << chunkID << "for" << transferID << ". Total written:" << session.bytesTransferred;
 
-        processBufferedChunks(transferID);
+        processBufferedChunks(transferID); // 这可能会触发更多写入或更新 highestContiguousChunkReceived
 
-        if (session.highestContiguousChunkReceived == session.totalChunks - 1) {
-            qInfo() << "FileTransferManager: All chunks appear to be written for receiver " << transferID;
-            // 传输完成，立即ACK最后一次
-            if (m_pendingAckCount[transferID] > 0) {
-                sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
-                m_pendingAckCount[transferID] = 0;
+        // 检查是否所有预期的块都已连续写入
+        bool allChunksWrittenAndContiguous = (session.highestContiguousChunkReceived == session.totalChunks - 1);
+        
+        // 检查此传输的所有未完成写入操作是否已完成
+        bool allWritesComplete = (m_outstandingWriteRequests.value(transferID, 0) == 0);
+
+        if (allChunksWrittenAndContiguous && allWritesComplete && session.eofMessageReceived) {
+            // 关键条件：所有数据都在磁盘上，所有写入操作都已完成，并且先前已收到EOF。
+            qInfo() << "FileTransferManager::handleChunkWritten: All chunks written, all writes complete, and EOF was pending for" << transferID << ". Processing deferred EOF.";
+            
+            if (session.cachedTotalChunksReportedByPeer != session.totalChunks) {
+                 qWarning() << "FileTransferManager::handleChunkWritten (deferred EOF): Total chunks mismatch for" << transferID
+                           << ". Peer reported:" << session.cachedTotalChunksReportedByPeer << ", we calculated:" << session.totalChunks;
+            }
+
+            qInfo() << "FileTransferManager: Processing deferred EOF for" << transferID << ". File" << session.fileName << "received. Sending EOF_ACK.";
+            sendEOFAck(session.peerUuid, transferID);
+            cleanupSession(transferID, true, tr("File received successfully (processed deferred EOF)."));
+        } else if (allChunksWrittenAndContiguous && allWritesComplete && !session.eofMessageReceived) {
+            // 所有块都已写入，所有写入都已完成，但尚未收到EOF消息。
+            // 这是接收方完成其数据传输部分的时刻，正在等待发送方的EOF。
+            // 无论m_pendingAckCount如何，都发送一个最终的DATA_ACK以确保发送方知道所有数据都已收到。
+            qInfo() << "FileTransferManager: All chunks written and all writes complete for receiver " << transferID 
+                    << ". Ensuring final DATA_ACK for chunk " << session.highestContiguousChunkReceived << " before waiting for EOF.";
+            sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+            
+            // 清理ACK计数和定时器，因为数据传输部分已完成。
+            if (m_pendingAckCount.contains(transferID)) {
+                m_pendingAckCount[transferID] = 0; // 重置计数器，因为我们刚刚发送了最终的DATA_ACK
             }
             if (m_ackDelayTimers.contains(transferID)) {
                 m_ackDelayTimers[transferID]->stop();
@@ -563,9 +586,44 @@ void FileTransferManager::handleChunkWritten(const QString& transferID, qint64 c
                 m_ackDelayTimers.remove(transferID);
             }
         }
+        // 如果并非所有块都已写入或写入仍在进行中，则此处不对EOF执行特殊操作。
+        // 数据块的常规ACK逻辑（批处理/延迟）在handleFileChunk中处理。
+
     } else {
-        qWarning() << "FileTransferManager: Wrote chunk" << chunkID << "but expected" << (session.highestContiguousChunkReceived + 1);
-        sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+        // 这种情况（成功写入后 chunkID != session.highestContiguousChunkReceived + 1）
+        // 意味着一个乱序的块写入已完成。这是正常的。
+        qDebug() << "FileTransferManager: Wrote out-of-order chunk" << chunkID << "successfully for" << transferID
+                   << ". Highest contiguous is still" << session.highestContiguousChunkReceived;
+        
+        // 如果这是最后一个未完成的写入，并且满足其他条件，则检查延迟的EOF。
+        bool allWritesComplete = (m_outstandingWriteRequests.value(transferID, 0) == 0);
+        bool allChunksWrittenAndContiguous = (session.highestContiguousChunkReceived == session.totalChunks - 1);
+
+        if (allChunksWrittenAndContiguous && allWritesComplete && session.eofMessageReceived) {
+             qInfo() << "FileTransferManager::handleChunkWritten (after out-of-order write): All chunks written, all writes complete, and EOF was pending for" << transferID << ". Processing deferred EOF.";
+            if (session.cachedTotalChunksReportedByPeer != session.totalChunks) {
+                 qWarning() << "FileTransferManager::handleChunkWritten (deferred EOF after OOO write): Total chunks mismatch for" << transferID
+                           << ". Peer reported:" << session.cachedTotalChunksReportedByPeer << ", we calculated:" << session.totalChunks;
+            }
+            sendEOFAck(session.peerUuid, transferID);
+            cleanupSession(transferID, true, tr("File received successfully (processed deferred EOF)."));
+        } else if (allChunksWrittenAndContiguous && allWritesComplete && !session.eofMessageReceived) {
+            // 与上面类似，即使在乱序写入完成后达到此状态，也确保发送最终的DATA_ACK。
+            qInfo() << "FileTransferManager: All chunks written and all writes complete for receiver " << transferID 
+                    << " (after out-of-order write). Ensuring final DATA_ACK for chunk " << session.highestContiguousChunkReceived << " before waiting for EOF.";
+            sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+            
+            if (m_pendingAckCount.contains(transferID)) {
+                m_pendingAckCount[transferID] = 0;
+            }
+            if (m_ackDelayTimers.contains(transferID)) {
+                m_ackDelayTimers[transferID]->stop();
+                m_ackDelayTimers[transferID]->deleteLater();
+                m_ackDelayTimers.remove(transferID);
+            }
+        }else{
+            sendDataAck(session.peerUuid, transferID, session.highestContiguousChunkReceived);
+        }
     }
 }
 
@@ -659,7 +717,7 @@ void FileTransferManager::sendEOF(const QString& transferID) {
 }
 
 void FileTransferManager::handleEOF(const QString& peerUuid, const QString& transferID, qint64 totalChunksReported, const QString& finalChecksum) {
-    Q_UNUSED(finalChecksum);
+    Q_UNUSED(finalChecksum); // 假设校验和尚未完全实现（基于 "NOT_IMPLEMENTED"）
     if (!m_sessions.contains(transferID)) return;
     FileTransferSession& session = m_sessions[transferID];
 
@@ -668,32 +726,66 @@ void FileTransferManager::handleEOF(const QString& peerUuid, const QString& tran
         return;
     }
     
-    if (m_outstandingWriteRequests.value(transferID, 0) > 0) {
-        qWarning() << "FileTransferManager::handleEOF: Received EOF for" << transferID << "but" << m_outstandingWriteRequests.value(transferID, 0) << "writes are still outstanding. Deferring EOF processing.";
-        return;
+    // 存储已收到EOF及其详细信息，无论当前状态如何
+    session.eofMessageReceived = true;
+    session.cachedTotalChunksReportedByPeer = totalChunksReported;
+    // session.cachedFinalChecksumFromPeer = finalChecksum; // 如果使用校验和
+
+    qInfo() << "FileTransferManager::handleEOF: Received EOF for" << transferID 
+            << ". Writes outstanding:" << m_outstandingWriteRequests.value(transferID, 0)
+            << ". Last received chunk:" << session.highestContiguousChunkReceived 
+            << ". Total expected:" << (session.totalChunks -1);
+
+    // 条件1：是否所有块都已连续接收？
+    if (session.highestContiguousChunkReceived != session.totalChunks - 1) {
+        qWarning() << "FileTransferManager::handleEOF: EOF for" << transferID 
+                   << "received, but not all chunks are contiguously present. Last received:" << session.highestContiguousChunkReceived
+                   << ". Attempting to process buffered chunks.";
+        processBufferedChunks(transferID); // 尝试填补空白
+
+        // 处理缓冲块后重新检查
+        if (session.highestContiguousChunkReceived != session.totalChunks - 1) {
+            // 仍然缺少块。
+            // 如果*已接收*块没有挂起的写入，则这是一个错误。
+            if (m_outstandingWriteRequests.value(transferID, 0) == 0) {
+                qWarning() << "FileTransferManager::handleEOF: After processing buffered, still missing chunks for" << transferID
+                           << "and no writes pending. Error.";
+                sendError(peerUuid, transferID, "EOF_WITH_MISSING_CHUNKS", "Received EOF but chunks are missing and no writes pending for them.");
+                cleanupSession(transferID, false, tr("Transfer incomplete: EOF received with missing chunks."));
+                return;
+            } else {
+                // 缺少块，但写入正在进行中。推迟。
+                qInfo() << "FileTransferManager::handleEOF: EOF for" << transferID << "deferred. Missing chunks, but writes are pending.";
+                return; // 推迟，handleChunkWritten将检查eofMessageReceived
+            }
+        }
+        // 如果执行到此处，则在processBufferedChunks之后，所有块现在都是连续的
+        qInfo() << "FileTransferManager::handleEOF: All chunks became contiguous after processing buffered for" << transferID;
     }
 
-    if (session.highestContiguousChunkReceived != session.totalChunks - 1) {
-        qWarning() << "FileTransferManager::handleEOF: Received EOF for" << transferID 
-                   << "but not all chunks are contiguously received. Last received:" << session.highestContiguousChunkReceived
-                   << "Total expected:" << (session.totalChunks -1);
-        processBufferedChunks(transferID);
-        if (session.highestContiguousChunkReceived != session.totalChunks -1 && m_outstandingWriteRequests.value(transferID, 0) == 0) {
-            sendError(peerUuid, transferID, "EOF_WITH_MISSING_CHUNKS", "Received EOF but chunks are missing.");
-            cleanupSession(transferID, false, tr("Transfer incomplete: EOF received with missing chunks."));
-            return;
-        } else if (session.highestContiguousChunkReceived != session.totalChunks -1) {
-            qInfo() << "FileTransferManager::handleEOF: EOF for" << transferID << "received, but waiting for pending writes to complete for missing chunks.";
-            return; 
-        }
+    // 此时，所有块都已连续接收 (session.highestContiguousChunkReceived == session.totalChunks - 1)
+
+    // 条件2：这些块是否有任何未完成的写入？
+    if (m_outstandingWriteRequests.value(transferID, 0) > 0) {
+        qWarning() << "FileTransferManager::handleEOF: EOF for" << transferID 
+                   << "received, all chunks present, but" << m_outstandingWriteRequests.value(transferID, 0) 
+                   << "writes are still outstanding. Deferring EOF processing.";
+        return; // 推迟，handleChunkWritten将检查eofMessageReceived
     }
+
+    // 如果执行到此处：
+    // 1. 已收到EOF消息。
+    // 2. 所有块都已连续接收。
+    // 3. 这些块的所有写入操作都已完成。
+    // 是时候发送EOF_ACK了。
     
-    if (totalChunksReported != session.totalChunks) {
+    if (totalChunksReported != session.totalChunks) { // 使用消息中的原始totalChunksReported
         qWarning() << "FileTransferManager::handleEOF: Total chunks mismatch for" << transferID 
                    << ". Peer reported:" << totalChunksReported << ", we calculated:" << session.totalChunks;
+        // 决定这是否是致命错误或只是警告。目前是警告。
     }
 
-    qInfo() << "FileTransferManager: Received EOF for" << transferID << ". File" << session.fileName << "received.";
+    qInfo() << "FileTransferManager: Processing EOF for" << transferID << ". File" << session.fileName << "received. Sending EOF_ACK.";
     sendEOFAck(peerUuid, transferID);
     cleanupSession(transferID, true, tr("File received successfully."));
 }
